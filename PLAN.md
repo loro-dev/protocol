@@ -49,22 +49,20 @@ Notes (encoding correctness):
 - IV must be 12 bytes; tag 16 bytes; AAD is the exact concatenation of the encoded plaintext header fields.
 
 ### Phase 2 — Client Adaptor (%ELO)
-- [ ] Add `EloLoroAdaptor` in `packages/loro-adaptors`:
-  - [ ] `crdtType = CrdtType.Elo`.
-  - [ ] Config: `{ getPrivateKey: (keyId?: string) => Promise<{ keyId, key: Uint8Array }> }` (+ optional fixed `keyId`).
-  - [ ] Outbound (use Loro export APIs):
-    - After JoinResponseOk, decode server `version` (VersionVector). Convert to Frontiers via `doc.vvToFrontiers(serverVV)`.
-    - Compute forward spans via `doc.findIdSpansBetween(serverFrontiers, doc.frontiers())`.
-    - For each span `{ peer, counter, length }`:
-      - Header: `peerId` = bytes of the span’s `peer` (e.g., `new TextEncoder().encode(peer)`), `start = counter`, `end = counter + length`.
-      - Plaintext: `doc.export({ mode: "updates-in-range", spans: [{ id: { peer, counter }, len: length }] })`.
-      - Encrypt with random 12‑byte IV and include `keyId` and `iv` in header; build container with one record per span.
-    - Maintain `lastSentFrontiers`; on subsequent commits, compute spans between `lastSentFrontiers` and `doc.frontiers()` and repeat. Use `subscribe()`/`subscribeLocalUpdates()` only to trigger a packaging cycle; do not send raw `subscribeLocalUpdates` bytes directly.
-  - [ ] Inbound: parse container, for each record resolve key, decrypt, import plaintext (snapshot or updates) into `LoroDoc`.
-  - [ ] Snapshots: build Snapshot records with header `vv = doc.version()` (encode as sorted `[peerId, counter]` pairs by `peerId` bytes asc), plaintext `doc.export({ mode: "snapshot" })` (or `"shallow-snapshot"` when configured).
-  - [ ] Implement unknown key/decrypt failure callbacks (local only; no UpdateError).
-  - [ ] `getVersion()` returns `doc.version().encode()` (unchanged semantics).
-- [ ] Tests: adaptor unit tests for decrypt/apply and encrypt/round‑trip (with deterministic IV in tests).
+- [x] Add `EloLoroAdaptor` in `packages/loro-adaptors`:
+  - [x] `crdtType = CrdtType.Elo`.
+  - [x] Config: `{ getPrivateKey: (keyId?: string) => Promise<{ keyId, key: CryptoKey|Uint8Array }> }`; optional `ivFactory`, `snapshotMode`, `onDecryptError`, `onUpdateError`.
+  - [x] Outbound (use Loro export APIs when available; fallback otherwise):
+    - After JoinResponseOk, decode server `version` and convert to frontiers via `vvToFrontiers()` when present; seed `lastSentFrontiers`.
+    - Compute forward spans via `findIdSpansBetween(from,to)`; if present, export each with `export({ mode: "updates-in-range", spans })` and encrypt to DeltaSpan records.
+    - If spans/frontiers APIs unavailable, send a full Snapshot instead. `subscribeLocalUpdates()` is used only to trigger packaging; raw bytes are never sent directly.
+  - [x] Inbound: parse container, resolve key, decrypt, and `doc.import` plaintext (snapshot or updates).
+  - [x] Snapshots: header `vv` sorted by peerId bytes; plaintext from `export({ mode: snapshot | shallow-snapshot })`.
+  - [x] Unknown key/decrypt failure handled via local callbacks (no UpdateError emission).
+  - [x] `getVersion()` returns `doc.version().encode()`.
+- [x] Tests: adaptor unit tests (snapshot join path; apply snapshot). Delta spans are scaffolded; delta tests pending spans API availability in this env.
+
+Status: Phase 2 core complete with snapshot packaging and decrypt/apply. Forward-delta packaging is implemented behind runtime checks and falls back to snapshots when necessary; add delta-flow tests once spans/frontiers APIs are accessible.
 
 ### Phase 3 — Server Indexing & Join (SimpleServer)
 - [ ] Accept `%ELO` in `packages/loro-websocket/src/server/simple-server.ts`:

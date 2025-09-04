@@ -139,12 +139,20 @@ function getSubtle(): SubtleCrypto {
   throw new Error("Web Crypto not available in this environment");
 }
 
+// Ensure strict DOM BufferSource types without casts by copying into ArrayBuffer
+function toArrayBuffer(u8: Uint8Array): ArrayBuffer {
+  const ab = new ArrayBuffer(u8.byteLength);
+  new Uint8Array(ab).set(u8);
+  return ab;
+}
+
 export async function importAesGcmKey(key: Uint8Array): Promise<CryptoKey> {
   if (!(key instanceof Uint8Array)) throw new Error("Key must be Uint8Array");
   if (key.length !== 16 && key.length !== 32) {
     throw new Error("AES-GCM key must be 16 or 32 bytes");
   }
-  return await getSubtle().importKey("raw", key, { name: "AES-GCM" }, false, [
+  // Pass ArrayBuffer to satisfy BufferSource typing
+  return await getSubtle().importKey("raw", toArrayBuffer(key), { name: "AES-GCM" }, false, [
     "encrypt",
     "decrypt",
   ]);
@@ -166,9 +174,9 @@ export async function aesGcmEncrypt(
   const k = key instanceof Uint8Array ? await importAesGcmKey(key) : key;
   if (iv.length !== 12) throw new Error("IV must be 12 bytes");
   const res = await subtle.encrypt(
-    { name: "AES-GCM", iv, additionalData: aad },
+    { name: "AES-GCM", iv: toArrayBuffer(iv), additionalData: aad ? toArrayBuffer(aad) : undefined },
     k,
-    plaintext
+    toArrayBuffer(plaintext)
   );
   // Web Crypto returns ciphertext||tag; store as-is per spec (tag is 16 bytes)
   return new Uint8Array(res);
@@ -184,9 +192,9 @@ export async function aesGcmDecrypt(
   const k = key instanceof Uint8Array ? await importAesGcmKey(key) : key;
   if (iv.length !== 12) throw new Error("IV must be 12 bytes");
   const res = await subtle.decrypt(
-    { name: "AES-GCM", iv, additionalData: aad },
+    { name: "AES-GCM", iv: toArrayBuffer(iv), additionalData: aad ? toArrayBuffer(aad) : undefined },
     k,
-    ct
+    toArrayBuffer(ct)
   );
   return new Uint8Array(res);
 }
