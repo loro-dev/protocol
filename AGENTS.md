@@ -1,17 +1,10 @@
 # AGENTS.md
 
-Guidance for code agents working in this repository.
+This file provides guidance to ai agents when working with code in this repository.
 
 ## Project Overview
 
-Loro Protocol is a transport‑agnostic synchronization protocol for collaborative real‑time data structures (CRDTs). This monorepo contains:
-
-- TypeScript protocol encoder/decoder (`packages/loro-protocol`)
-- WebSocket client and a minimal Node server (`packages/loro-websocket`)
-- Adaptors that bridge the protocol to the Loro CRDT (`packages/loro-adaptors`)
-- A Rust workspace with protocol/client/server equivalents under `rust/`
-
-No Cloudflare/DO code lives in this repo.
+Loro Protocol is a synchronization protocol for collaborative real-time data structures (CRDTs). It supports Loro, Yjs, and other CRDT systems over WebSocket and P2P connections.
 
 ## Common Development Commands
 
@@ -19,80 +12,197 @@ No Cloudflare/DO code lives in this repo.
 # Install dependencies
 pnpm install
 
-# Build / test / lint across packages
-pnpm -r build
-pnpm -r test
-pnpm -r typecheck
-pnpm -r lint
+# Run development watch mode
+pnpm dev
 
-# Dev/watch (where supported)
-pnpm -r dev
+# Run tests
+pnpm test
+
+# Build all packages
+pnpm build
+
+# Type checking
+pnpm typecheck
+
+# Linting
+pnpm lint
 
 # Clean build artifacts
-pnpm -r clean
+pnpm clean
 ```
 
 ## Architecture
 
 ### Monorepo Structure
 
-- `packages/loro-protocol`: Core wire encoding/decoding logic (TS)
-- `packages/loro-websocket`: WebSocket client and `SimpleServer` (TS)
-- `packages/loro-adaptors`: Adaptors for `loro-crdt` docs and ephemeral state (TS)
-- `examples/excalidraw-example`: React demo using `SimpleServer`
-- `rust/`: Rust workspace with `loro-protocol`, `loro-websocket-client`, `loro-websocket-server`
+- **packages/loro-protocol**: Core protocol implementation with encoding/decoding logic
+- **packages/loro-websocket**: WebSocket client/server implementations (currently placeholders)
 
-### Protocol Essentials
+## Important Design Documents
 
-See `/protocol.md`.
+**When implementation behavior doesn't match expectations, these documents are the source of truth:**
 
-- Message envelope: 4‑byte CRDT magic, varBytes roomId (≤128B), 1‑byte type, payload
-- Types: JoinRequest/JoinResponseOk/JoinError, DocUpdate, DocUpdateFragmentHeader/Fragment, UpdateError, Leave
-- Limit: 256 KiB max per message; large payloads must be fragmented
-- Keepalive: connection‑scoped text frames "ping"/"pong" (out‑of‑band)
+- `/protocol.md`: Wire protocol specification - defines message formats and syncing process
+- `/protocol-e2ee.md`: End-to-end encryption protocol
 
-Key TS files:
+These documents represent the ground truth design. If there are inconsistencies between code and these specs, follow the specifications.
 
-- `packages/loro-protocol/src/{bytes,encoding,protocol}.ts`
+# Development Guidelines
 
-## Build & Test
+## Philosophy
 
-- TypeScript: `vitest` tests are co‑located with sources (`*.test.ts`). The websocket package includes e2e tests spinning up `SimpleServer`.
-- Rust: run with `cargo` under `rust/` (tests in crates and `tests/`).
+### Core Beliefs
 
-Useful references:
+- **Incremental progress over big bangs** - Small changes that compile and pass tests
+- **Learning from existing code** - Study and plan before implementing
+- **Pragmatic over dogmatic** - Adapt to project reality
+- **Clear intent over clever code** - Be boring and obvious
 
-- TS E2E: `packages/loro-websocket/src/e2e.test.ts`
-- Rust server example: `rust/loro-websocket-server/examples/simple-server.rs`
+### Simplicity Means
 
-## Implementation Notes
+- Single responsibility per function/class
+- Avoid premature abstractions
+- No clever tricks - choose the boring solution
+- If you need to explain it, it's too complex
+- Avoid over-engineering, don't write low-value docs/comments/tests. They'll increase the maintenance cost and make code review harder.
+- Your changes should be easy to review. Please address the part that you want human to focus on by adding `TODO: REVIEW [reason]`.
+- Don't test obvious things.
 
-- Fragmentation: servers/clients reassemble using `DocUpdateFragmentHeader` + `DocUpdateFragment` with an 8‑byte batch id
-- Rooms: one WS connection can join multiple rooms (CRDT+roomId pair)
-- CRDTs: Loro (`%LOR`), Loro Ephemeral (`%EPH`), Yjs (`%YJS`), Yjs Awareness (`%YAW`)
-- Errors: explicit small codes for join/update failures
-- Auth: `SimpleServer` exposes `authenticate` and snapshot load/save hooks
+## Process
 
-## Development Guidelines
+### 1. Planning & Staging
 
-Principles:
+Break complex work into 3-5 stages. Document in `IMPLEMENTATION_PLAN.md`:
 
-- Incremental, boring, and obvious code
-- Single responsibility; avoid premature abstractions
-- Tests for new behavior; don’t disable existing tests
+```markdown
+## Stage N: [Name]
 
-Process:
+**Goal**: [Specific deliverable]
+**Success Criteria**: [Testable outcomes]
+**Tests**: [Specific test cases]
+**Status**: [Not Started|In Progress|Complete]
+```
 
-1. Understand existing patterns
-2. Add/adjust tests
-3. Implement minimally to pass
-4. Refactor with tests passing
+- Update status as you progress
+- Remove file when all stages are done
 
-Quality gates:
+### 2. Implementation Flow
 
-- All packages build and tests pass
-- Lint/format clean
-- Clear commit messages (explain “why”)
-- Mark the important code and error-proned code with comments like `// TODO: REVIEW: <REASON>`
+1. **Understand** - Study existing patterns in codebase
+2. **Test** - Write test first (red)
+3. **Implement** - Minimal code to pass (green)
+4. **Refactor** - Clean up with tests passing
+5. **Commit** - With clear message linking to plan
 
-When stuck (≤3 attempts): document failures, explore alternatives, question assumptions, try a simpler angle.
+### 3. When Stuck (After 3 Attempts)
+
+**CRITICAL**: Maximum 3 attempts per issue, then STOP.
+
+1. **Document what failed**:
+   - What you tried
+   - Specific error messages
+   - Why you think it failed
+
+2. **Research alternatives**:
+   - Find 2-3 similar implementations
+   - Note different approaches used
+
+3. **Question fundamentals**:
+   - Is this the right abstraction level?
+   - Can this be split into smaller problems?
+   - Is there a simpler approach entirely?
+
+4. **Try different angle**:
+   - Different library/framework feature?
+   - Different architectural pattern?
+   - Remove abstraction instead of adding?
+
+## Technical Standards
+
+### Architecture Principles
+
+- **Composition over inheritance** - Use dependency injection
+- **Interfaces over singletons** - Enable testing and flexibility
+- **Explicit over implicit** - Clear data flow and dependencies
+- **Test-driven when possible** - Never disable tests, fix them
+
+### Code Quality
+
+- **Every commit must**:
+  - Compile successfully
+  - Pass all existing tests
+  - Include tests for new functionality
+  - Follow project formatting/linting
+
+- **Before committing**:
+  - Run formatters/linters
+  - Self-review changes
+  - Ensure commit message explains "why"
+
+### Error Handling
+
+- Fail fast with descriptive messages
+- Include context for debugging
+- Handle errors at appropriate level
+- Never silently swallow exceptions
+
+## Decision Framework
+
+When multiple valid approaches exist, choose based on:
+
+1. **Testability** - Can I easily test this?
+2. **Readability** - Will someone understand this in 6 months?
+3. **Consistency** - Does this match project patterns?
+4. **Simplicity** - Is this the simplest solution that works?
+5. **Reversibility** - How hard to change later?
+
+## Project Integration
+
+### Learning the Codebase
+
+- Find 3 similar features/components
+- Identify common patterns and conventions
+- Use same libraries/utilities when possible
+- Follow existing test patterns
+
+### Tooling
+
+- Use project's existing build system
+- Use project's test framework
+- Use project's formatter/linter settings
+- Don't introduce new tools without strong justification
+
+## Quality Gates
+
+### Definition of Done
+
+- [ ] Tests written and passing
+- [ ] Code follows project conventions
+- [ ] No linter/formatter warnings
+- [ ] Commit messages are clear
+- [ ] Implementation matches plan
+- [ ] No TODOs without issue numbers
+
+### Test Guidelines
+
+- Test behavior, not implementation
+- One assertion per test when possible
+- Clear test names describing scenario
+- Use existing test utilities/helpers
+- Tests should be deterministic
+
+## Important Reminders
+
+**NEVER**:
+
+- Use `--no-verify` to bypass commit hooks
+- Disable tests instead of fixing them
+- Commit code that doesn't compile
+- Make assumptions - verify with existing code
+
+**ALWAYS**:
+
+- Commit working code incrementally
+- Update plan documentation as you go
+- Learn from existing implementations
+- Stop after 3 failed attempts and reassess
