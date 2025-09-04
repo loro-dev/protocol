@@ -68,6 +68,10 @@ export class BytesReader {
     return this.buf.length - this.offset;
   }
 
+  get position(): number {
+    return this.offset;
+  }
+
   readByte(): number {
     if (this.offset >= this.buf.length) {
       throw new Error("readByte out of bounds");

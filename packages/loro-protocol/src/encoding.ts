@@ -24,6 +24,7 @@ const validCrdtTypes = [
   CrdtType.LoroEphemeralStore,
   CrdtType.Yjs,
   CrdtType.YjsAwareness,
+  CrdtType.Elo,
 ];
 
 const MAX_ROOM_ID_LENGTH = 128;
@@ -34,7 +35,8 @@ function isCrdtType(x: unknown): x is CrdtType {
     (x === CrdtType.Loro ||
       x === CrdtType.LoroEphemeralStore ||
       x === CrdtType.Yjs ||
-      x === CrdtType.YjsAwareness)
+      x === CrdtType.YjsAwareness ||
+      x === CrdtType.Elo)
   );
 }
 

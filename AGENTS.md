@@ -93,5 +93,6 @@ Quality gates:
 - All packages build and tests pass
 - Lint/format clean
 - Clear commit messages (explain “why”)
+- Mark the important code and error-proned code with comments like `// TODO: REVIEW: <REASON>`
 
 When stuck (≤3 attempts): document failures, explore alternatives, question assumptions, try a simpler angle.

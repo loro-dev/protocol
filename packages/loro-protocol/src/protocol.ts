@@ -7,12 +7,14 @@ export const CrdtType = {
   LoroEphemeralStore: "%EPH",
   Yjs: "%YJS",
   YjsAwareness: "%YAW",
+  Elo: "%ELO",
 } as const;
 export const CrdtTypeId = {
   Loro: "loro",
   LoroEphemeralStore: "eph",
   Yjs: "yjs",
   YjsAwareness: "yaw",
+  Elo: "elo",
 } as const;
 export type CrdtType = (typeof CrdtType)[keyof typeof CrdtType];
 export type CrdtId = (typeof CrdtTypeId)[keyof typeof CrdtTypeId];
@@ -21,6 +23,7 @@ export const MagicBytesToCrdtId = {
   "%EPH": "eph",
   "%YJS": "yjs",
   "%YAW": "yaw",
+  "%ELO": "elo",
 } as const;
 
 export type Permission = "read" | "write";
