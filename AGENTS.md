@@ -4,7 +4,7 @@ This file provides guidance to ai agents when working with code in this reposito
 
 ## Project Overview
 
-Loro Protocol is a synchronization protocol for collaborative real-time data structures (CRDTs). It supports Loro, Yjs, and other CRDT systems over WebSocket and P2P connections.
+Loro Protocol is a transport‑agnostic synchronization protocol for collaborative CRDTs. This monorepo contains a TypeScript implementation (protocol, WebSocket client/server, adaptors) and Rust counterparts. It supports Loro, Yjs, and other CRDT systems over WebSocket and P2P connections. An optional end‑to‑end encrypted flow for Loro documents ("%ELO") is included.
 
 ## Common Development Commands
 
@@ -35,8 +35,28 @@ pnpm clean
 
 ### Monorepo Structure
 
-- **packages/loro-protocol**: Core protocol implementation with encoding/decoding logic
-- **packages/loro-websocket**: WebSocket client/server implementations (currently placeholders)
+- **packages/loro-protocol**: Protocol types and binary encoders/decoders, bytes utilities, and `%ELO` container/crypto helpers (TypeScript). Key files: `src/{protocol,encoding,bytes,e2ee}.ts` with tests under `src/`.
+- **packages/loro-websocket**: WebSocket client and a `SimpleServer` (TypeScript).
+  - Features: message fragmentation/reassembly (≤256 KiB), connection‑scoped keepalive frames (`"ping"/"pong"` text), permission hooks, optional persistence hooks.
+- **packages/loro-adaptors**: Adaptors that connect the WebSocket client to `loro-crdt` (`LoroAdaptor`, `LoroEphemeralAdaptor`) and `%ELO` (`EloLoroAdaptor`).
+- **examples/excalidraw-example**: React demo using `SimpleServer`; syncs a Loro doc and ephemeral presence.
+- **rust/**: Rust workspace mirroring the TS packages:
+  - `rust/loro-protocol`: Encoder/decoder parity with JS (snapshot tests included).
+  - `rust/loro-websocket-client`: Minimal client.
+  - `rust/loro-websocket-server`: Async server with workspace isolation, auth hooks, and persistence example (see `examples/simple-server.rs`).
+
+### Protocol Overview
+
+- **CRDT magic bytes**: `%LOR` (Loro), `%EPH` (Ephemeral), `%YJS`, `%YAW`, `%ELO` (E2EE Loro).
+- **Messages**: JoinRequest/JoinResponseOk/JoinError, DocUpdate, DocUpdateFragmentHeader/Fragment, UpdateError, Leave.
+- **Limits**: 256 KiB max per message; large payloads are fragmented and reassembled.
+- **Keepalive**: Text frames `"ping"`/`"pong"` are connection‑scoped and bypass the envelope.
+- **%ELO**: DocUpdate payload is a container of encrypted records (DeltaSpan/Snapshot). Each record has a plaintext header (peer/version metadata, `keyId`, 12‑byte IV) and AES‑GCM ciphertext (`ct||tag`). Servers route/broadcast without decrypting.
+
+### Testing
+
+- **TypeScript**: `vitest` across packages via `vitest.workspace.ts` (unit + e2e in `packages/loro-websocket`).
+- **Rust**: `cargo test` in each crate; server/client e2e and auth tests under `rust/loro-websocket-server/tests`.
 
 ## Important Design Documents
 
