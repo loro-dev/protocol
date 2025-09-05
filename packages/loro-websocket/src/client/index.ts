@@ -51,6 +51,8 @@ export class LoroWebsocketClient {
   private connectedPromise: Promise<void>;
   private pendingRooms: Map<string, PendingRoom> = new Map();
   private activeRooms: Map<string, ActiveRoom> = new Map();
+  // Buffer for %ELO only: backfills can arrive immediately after JoinResponseOk
+  private preJoinUpdates: Map<string, Uint8Array[]> = new Map();
   private fragmentBatches: Map<string, FragmentBatch> = new Map();
   private roomAdaptors: Map<string, CrdtDocAdaptor> = new Map();
   private pingTimer?: ReturnType<typeof setInterval>;
@@ -130,10 +132,16 @@ export class LoroWebsocketClient {
         break;
       }
       case MessageType.DocUpdate: {
-        // const total = msg.updates.reduce((s, u) => s + (u?.length || 0), 0);
         const active = this.activeRooms.get(roomId);
         if (active) {
           active.handler.handleDocUpdate(msg.updates);
+        } else {
+          const pending = this.pendingRooms.get(roomId);
+          if (pending && pending.adaptor.crdtType === CrdtType.Elo) {
+            const buf = this.preJoinUpdates.get(roomId) ?? [];
+            buf.push(...msg.updates);
+            this.preJoinUpdates.set(roomId, buf);
+          }
         }
         break;
       }
@@ -240,6 +248,13 @@ export class LoroWebsocketClient {
       if (active) {
         // Treat reassembled data as a single update
         active.handler.handleDocUpdate([reassembledData]);
+      } else {
+        const pending = this.pendingRooms.get(id);
+        if (pending && pending.adaptor.crdtType === CrdtType.Elo) {
+          const buf = this.preJoinUpdates.get(id) ?? [];
+          buf.push(reassembledData);
+          this.preJoinUpdates.set(id, buf);
+        }
       }
     }
   }
@@ -254,6 +269,17 @@ export class LoroWebsocketClient {
     const id = crdtType + roomId;
     this.activeRooms.set(id, { room, handler });
     this.roomAdaptors.set(id, adaptor);
+
+    // Flush buffered %ELO updates if any
+    const buf = this.preJoinUpdates.get(id);
+    if (buf && buf.length) {
+      try {
+        handler.handleDocUpdate(buf);
+      } finally {
+        this.preJoinUpdates.delete(id);
+      }
+    }
+
     this.pendingRooms.delete(id);
   }
 
@@ -381,6 +407,7 @@ export class LoroWebsocketClient {
     });
 
     const room = response.then(res => {
+      // Set adaptor ctx first so it's ready to send updates
       crdtAdaptor.setCtx({
         send: (updates: Uint8Array[]) => {
           // Send each update individually, fragmenting when necessary
@@ -414,9 +441,8 @@ export class LoroWebsocketClient {
           );
         },
       });
-      crdtAdaptor.handleJoinOk(res).catch(e => {
-        console.error(e)
-      });
+      // Create room and register before invoking adaptor.handleJoinOk to ensure
+      // any immediate backfills from the server are routed to the adaptor.
       const { room, handler } = createLoroWebsocketClientRoom({
         ws: this.ws,
         client: this,
@@ -431,6 +457,9 @@ export class LoroWebsocketClient {
         handler,
         crdtAdaptor
       );
+      crdtAdaptor.handleJoinOk(res).catch(e => {
+        console.error(e);
+      });
       return room;
     });
 

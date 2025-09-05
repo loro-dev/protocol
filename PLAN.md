@@ -65,14 +65,14 @@ Notes (encoding correctness):
 Status: Phase 2 core complete with snapshot packaging and decrypt/apply. Forward-delta packaging is implemented behind runtime checks and falls back to snapshots when necessary; add delta-flow tests once spans/frontiers APIs are accessible.
 
 ### Phase 3 — Server Indexing & Join (SimpleServer)
-- [ ] Accept `%ELO` in `packages/loro-websocket/src/server/simple-server.ts`:
-  - [ ] Maintain per‑room `%ELO` state: `Map<peerIdHex, Array<{ start,end,keyId,record: Uint8Array }>>`.
-  - [ ] On `DocUpdate` with `%ELO`: reassemble fragments if any, decode container into records; validate headers (`end>start`, iv len, bounds) else `UpdateError.invalid_update`.
-  - [ ] Dedup/merge: if a new span `[S,E)` fully covers existing spans for same `peerId`, replace those spans (regardless of `keyId`).
-  - [ ] Join flow: respond with current version vector derived from spans (max `end` per peer). Then send all records where `end > vv[peerId]` to requester, re‑containerizing as needed and fragmenting via existing path. The server never inspects or rewrites `ct`.
-  - [ ] Broadcast: forward incoming updates as‑is to other subscribers (no decryption, no rewrite).
-  - [ ] Persistence hooks: leave `%ELO` storage in‑memory for now; document extension points for user persistence.
-- [ ] Tests: e2e with two `%ELO` clients sharing a key; verify join/backfill and live updates.
+- [x] Accept `%ELO` in `packages/loro-websocket/src/server/simple-server.ts`:
+  - [x] Maintain per‑room `%ELO` state: centralized in `packages/loro-websocket/src/server/elo-doc.ts` (EloDoc) with `spansByPeer` index of `{ start,end,keyId,record }`.
+  - [x] On `DocUpdate` with `%ELO`: reassemble fragments if any, decode container into records; validate headers (`end>start`, 12‑byte IV) else `UpdateError.invalid_update`.
+  - [x] Dedup/merge: for a new span `[S,E)`, replace any fully covered existing spans for the same peer.
+  - [x] Join flow: respond with current version vector derived from spans (max `end` per peer). Then send all records where `end > vv[peerId]` to requester, re‑containerizing via `encodeEloContainer`. Server never decrypts/rewrites `ct`.
+  - [x] Broadcast: forward incoming updates as‑is to other subscribers (no decryption, no rewrite).
+  - [x] Persistence hooks: keep `%ELO` storage in‑memory; logic isolated for easy extension.
+- [x] Tests: e2e with two `%ELO` clients sharing a key; verify join/backfill and live updates.
 
 ### Phase 4 — Test Vectors, Limits, Edge Cases
 - [ ] Add normative AES‑GCM vector from `protocol-e2ee.md` as a unit test (fix IV, key, AAD; verify `ct`).

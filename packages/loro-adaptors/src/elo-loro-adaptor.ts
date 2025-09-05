@@ -50,7 +50,10 @@ export class EloLoroAdaptor implements CrdtDocAdaptor {
   // Overloads to allow (config) or (doc, config)
   constructor(doc: LoroDoc, config: EloLoroAdaptorConfig);
   constructor(config: EloLoroAdaptorConfig);
-  constructor(docOrConfig: LoroDoc | EloLoroAdaptorConfig, maybeConfig?: EloLoroAdaptorConfig) {
+  constructor(
+    docOrConfig: LoroDoc | EloLoroAdaptorConfig,
+    maybeConfig?: EloLoroAdaptorConfig
+  ) {
     if (docOrConfig instanceof LoroDoc) {
       this.doc = docOrConfig;
       this.config = maybeConfig as EloLoroAdaptorConfig;
@@ -85,8 +88,7 @@ export class EloLoroAdaptor implements CrdtDocAdaptor {
     this.ctx = ctx;
     this.localUpdateUnsubscribe = this.doc.subscribeLocalUpdates(updates => {
       if (this.destroyed || !this.ctx) return;
-      // Prefer using the local update blob's meta to derive exact spans,
-      // to avoid re-sending server-originated updates.
+      // Use the emitted local update blob as plaintext; derive header span from blob meta.
       void (async () => {
         try {
           let startVVObj: Record<string, number> | undefined;
@@ -95,12 +97,42 @@ export class EloLoroAdaptor implements CrdtDocAdaptor {
             const meta = decodeImportBlobMeta(updates, false);
             const start = meta.partialStartVersionVector;
             const end = meta.partialEndVersionVector;
-            startVVObj = vvLikeToObject(start);
-            endVVObj = vvLikeToObject(end);
+            startVVObj = vvToObject(start);
+            endVVObj = vvToObject(end);
           } catch {
-            // If decodeImportBlobMeta fails, fall back to VV diff from last sent
+            // Fallback: treat as generic forward delta packaging
           }
 
+          const spans = computeSpansFromVV(
+            startVVObj ?? this.lastSentVV ?? {},
+            endVVObj ?? vvToObject(this.doc.version())
+          );
+
+          if (spans.length === 1) {
+            const { keyId, key } = await this.config.getPrivateKey();
+            const s = spans[0]!;
+            const peerIdBytes = new TextEncoder().encode(String(s.peer));
+            const iv = this.config.ivFactory
+              ? this.config.ivFactory()
+              : undefined;
+            const { record } = await encryptDeltaSpan(
+              updates,
+              {
+                peerId: peerIdBytes,
+                start: s.start,
+                end: s.start + s.length,
+                keyId,
+                iv,
+              },
+              key
+            );
+            const container = encodeEloContainer([record]);
+            this.ctx?.send([container]);
+            this.lastSentVV = endVVObj ?? vvToObject(this.doc.version());
+            return;
+          }
+
+          // Otherwise, fall back to forward-delta packaging by exporting ranges
           const sent = await this.packageAndSendForwardDeltas(
             startVVObj,
             endVVObj
@@ -138,12 +170,22 @@ export class EloLoroAdaptor implements CrdtDocAdaptor {
 
       // Compute initial spans using version vectors only (avoid vvToFrontiers due to possible incomplete oplog)
       const startJson: Record<string, number> = serverVersion
-        ? vvLikeToObject(serverVersion)
+        ? vvToObject(serverVersion)
         : {};
       this.lastSentVV = startJson;
       const sent = await this.packageAndSendForwardDeltas(startJson);
       if (!sent) {
-        await this.sendSnapshot();
+        // Only send snapshot if there is no server baseline. If the server has a version
+        // ahead of us, we should wait for backfill rather than sending our local snapshot.
+        const sv = serverVersion ?? null;
+        if (sv === null) {
+          await this.sendSnapshot();
+        } else {
+          const cmp = this.doc.version().compare(sv);
+          if (cmp != null && cmp >= 0) {
+            await this.sendSnapshot();
+          }
+        }
       }
       if (!serverVersion) {
         // No server baseline; after sending initial state, consider ourselves at or beyond server
@@ -204,7 +246,7 @@ export class EloLoroAdaptor implements CrdtDocAdaptor {
     const { keyId, key } = await this.config.getPrivateKey();
     const mode = "snapshot";
     const plaintext = this.doc.export({ mode });
-    const vvObj = vvLikeToObject(this.doc.version());
+    const vvObj = vvToObject(this.doc.version());
     const vvEntries: Array<{ peerId: Uint8Array; counter: number }> =
       Object.keys(vvObj).map(peer => ({
         peerId: new TextEncoder().encode(peer),
@@ -227,40 +269,40 @@ export class EloLoroAdaptor implements CrdtDocAdaptor {
     // Compute spans using only version vectors: for each peer, [start, end)
     const start: Record<string, number> = startVV ?? this.lastSentVV ?? {};
     const end: Record<string, number> =
-      endVVOverride ?? vvLikeToObject(this.doc.version());
+      endVVOverride ?? vvToObject(this.doc.version());
     const spans = computeSpansFromVV(start, end);
     if (spans.length === 0) return false;
 
     const { keyId, key } = await this.config.getPrivateKey();
     const records: Uint8Array[] = [];
-    try {
-      for (const s of spans) {
-        const peer = s.peer;
-        const startCounter = s.start;
-        const length = s.length;
-        const endCounter = startCounter + length;
-        const peerIdBytes = new TextEncoder().encode(String(peer));
-        const plaintext = this.doc.export({
-          mode: "updates-in-range",
-          spans: [{ id: { peer: toPeerIdString(peer), counter: startCounter }, len: length }],
-        });
-        const iv = this.config.ivFactory ? this.config.ivFactory() : undefined;
-        const { record } = await encryptDeltaSpan(
-          plaintext,
+    for (const s of spans) {
+      const peer = s.peer;
+      const startCounter = s.start;
+      const length = s.length;
+      const endCounter = startCounter + length;
+      const peerIdBytes = new TextEncoder().encode(String(peer));
+      const plaintext = this.doc.export({
+        mode: "updates-in-range",
+        spans: [
           {
-            peerId: peerIdBytes,
-            start: startCounter,
-            end: endCounter,
-            keyId,
-            iv,
+            id: { peer: toPeerIdString(peer), counter: startCounter },
+            len: length,
           },
-          key
-        );
-        records.push(record);
-      }
-    } catch {
-      // Unsupported export mode, let caller fallback to snapshot
-      return false;
+        ],
+      });
+      const iv = this.config.ivFactory ? this.config.ivFactory() : undefined;
+      const { record } = await encryptDeltaSpan(
+        plaintext,
+        {
+          peerId: peerIdBytes,
+          start: startCounter,
+          end: endCounter,
+          keyId,
+          iv,
+        },
+        key
+      );
+      records.push(record);
     }
 
     if (records.length === 0) return false;
@@ -282,6 +324,7 @@ export class EloLoroAdaptor implements CrdtDocAdaptor {
           rec,
           async keyId => (await this.config.getPrivateKey(keyId)).key
         );
+        // TODO: should we handle pending updates here?
         if (out.kind === EloRecordKind.Snapshot) {
           this.doc.import(out.plaintext);
         } else {
@@ -332,74 +375,13 @@ function toPeerIdString(peer: string): `${number}` {
   return peer as `${number}`;
 }
 
-// Convert a VersionVector-like value to a plain object { [peer: string]: number }
-function vvLikeToObject(vvLike: unknown): Record<string, number> {
-  if (vvLike == null) return {};
-
-  // Prefer a .toJSON() serializer if available
-  if (hasToJSON(vvLike)) {
-    const json = vvLike.toJSON();
-    if (json instanceof Map) {
-      const out: Record<string, number> = {};
-      for (const [peer, counter] of json.entries()) {
-        const k = String(peer);
-        const num = typeof counter === "number" ? counter : Number(counter);
-        if (!Number.isNaN(num)) out[k] = num;
-      }
-      return out;
-    }
-    if (json && typeof json === "object") {
-      const out: Record<string, number> = {};
-      for (const k of Object.keys(json as Record<string, unknown>)) {
-        const raw = (json as Record<string, unknown>)[k];
-        const num = typeof raw === "number" ? raw : Number(raw);
-        if (!Number.isNaN(num)) out[k] = num;
-      }
-      return out;
-    }
+function vvToObject(vvLike: VersionVector): Record<string, number> {
+  const json = vvLike.toJSON();
+  const out: Record<string, number> = {};
+  for (const [peer, counter] of json.entries()) {
+    const k = String(peer);
+    const num = typeof counter === "number" ? counter : Number(counter);
+    if (!Number.isNaN(num)) out[k] = num;
   }
-
-  // Fallback to entries() iterator if present
-  if (hasEntries(vvLike)) {
-    const out: Record<string, number> = {};
-    for (const pair of vvLike.entries()) {
-      const [peer, counter] = pair as readonly [unknown, unknown];
-      const k = String(peer);
-      const num = typeof counter === "number" ? counter : Number(counter);
-      if (!Number.isNaN(num)) out[k] = num;
-    }
-    return out;
-  }
-
-  // Last resort: treat as a plain record
-  if (isRecord(vvLike)) {
-    const out: Record<string, number> = {};
-    for (const k of Object.keys(vvLike)) {
-      const val = (vvLike as Record<string, unknown>)[k];
-      const num = typeof val === "number" ? val : Number(val);
-      if (!Number.isNaN(num)) out[k] = num;
-    }
-    return out;
-  }
-  return {};
-}
-
-function hasToJSON(x: unknown): x is { toJSON(): unknown } {
-  return (
-    !!x &&
-    typeof x === "object" &&
-    typeof (x as { toJSON?: unknown }).toJSON === "function"
-  );
-}
-
-function hasEntries(x: unknown): x is { entries(): Iterable<unknown> } {
-  return (
-    !!x &&
-    typeof x === "object" &&
-    typeof (x as { entries?: unknown }).entries === "function"
-  );
-}
-
-function isRecord(x: unknown): x is Record<string, unknown> {
-  return !!x && typeof x === "object" && !Array.isArray(x);
+  return out;
 }
