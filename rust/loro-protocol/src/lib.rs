@@ -35,7 +35,9 @@
 pub mod bytes;
 pub mod protocol;
 pub mod encoding;
+pub mod elo;
 
 pub use bytes::{BytesReader, BytesWriter};
 pub use encoding::{decode, encode, try_decode};
 pub use protocol::*;
+pub use elo::*;

@@ -19,7 +19,7 @@ tracing = "0.1"
 
 [dev-dependencies]
 loro-websocket-client = { path = "../loro-websocket-client" }
-tokio = { version = "1", features = ["rt", "macros", "net", "sync", "time"] }
+tokio = { version = "1", features = ["rt", "macros", "net", "sync", "time", "process"] }
 rusqlite = { version = "0.31", features = ["bundled"] }
 clap = { version = "4", features = ["derive"] }
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }

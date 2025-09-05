@@ -81,9 +81,42 @@ Status: Phase 2 core complete with snapshot packaging and decrypt/apply. Forward
 - [x] Observability: ensure server logs anonymized header info only; never log `ct`.
 
 ### Phase 5 — Rust Parity (follow‑up)
-- [ ] `rust/loro-protocol`: add `%ELO` to enum + magic; expose helpers for container header parsing (no crypto).
-- [ ] `rust/loro-websocket-server`: accept `%ELO`; minimally broadcast updates and (optionally) build an in‑memory header index for join backfill (matching TS behavior).
-- [ ] Tests: basic accept/broadcast; header parser unit tests.
+- [x] `rust/loro-protocol`: wire‑level support for `%ELO`
+  - [x] Add `CrdtType::Elo` with magic bytes `%ELO`; update `from_magic_bytes()` and adjust any `match` statements referencing `CrdtType` (e.g., server/client hashing).
+  - [x] New module `src/elo.rs`: container + header parser only (no crypto).
+    - [x] Types: `EloRecordKind`, `EloDeltaHeader { peer_id: Vec<u8>, start: u64, end: u64, key_id: String, iv: [u8;12] }`, `EloSnapshotHeader { vv: Vec<(Vec<u8>, u64)>, key_id: String, iv: [u8;12] }`.
+    - [x] `decode_elo_container(data: &[u8]) -> Result<Vec<&[u8]>, String>` (validate no trailing bytes).
+    - [x] `parse_elo_record_header(record: &[u8]) -> Result<ParsedEloRecord, String>` returning header + `ct` view and exact `aad` bytes.
+    - [x] Invariants: `iv.len()==12`, `end > start` for deltas, `peer_id.len()<=64`, `key_id.len()<=64`, snapshot `vv` sorted by `peerId` bytes.
+  - [x] Tests (`tests/elo.rs`, `tests/elo_normative_vector.rs`):
+    - [x] Roundtrip `CrdtType` magic mapping includes `%ELO`.
+    - [x] Container decode happy path + trailing bytes error.
+    - [x] Header parse for both record kinds; invalid header cases return errors.
+    - [x] Normative Vector (DeltaSpan): header AAD bytes and ct match `protocol-e2ee.md`.
+
+- [x] `rust/loro-websocket-server`: accept and route `%ELO` without decryption
+  - [x] Treat `%ELO` as a supported CRDT for joining and broadcasting; do not import/apply to a `LoroDoc`.
+  - [x] Ensure fragment reassembly path also works for `%ELO` and re‑broadcasts original frames (implemented, generic across CRDTs).
+  - [x] Keep version bytes empty on join for `%ELO` (no server‑side state).
+  - [x] Add an in‑memory `%ELO` header index (mirror of TS `EloDoc`).
+    - [x] Parse headers with `loro-protocol::elo` helpers, index spans per peer, dedup covered spans.
+    - [x] Join/backfill wiring: on join, decode the client's VersionVector and backfill only records whose `end` exceeds the client’s known counter for that peer; re‑containerize as opaque `DocUpdate`.
+  - [x] Refactor server to per‑CRDT doc handlers (trait objects) instead of large `match` branches:
+    - [x] `LoroRoomDoc`: snapshot export/import, apply updates, marked for persistence.
+    - [x] `EphemeralRoomDoc`: ephemeral store apply/encode‑all; auto‑cleanup when last subscriber leaves.
+    - [x] `EloRoomDoc`: header indexing only; no decryption; allows backfill without other clients.
+
+- [x] Tests (server):
+  - [x] `elo_accept_broadcast.rs`: two clients join `%ELO` room; sender posts a `%ELO` `DocUpdate` (opaque bytes); receiver gets identical payload.
+  - [x] `elo_fragment_reassembly.rs`: large `%ELO` payload via `DocUpdateFragmentHeader` + `DocUpdateFragment`; ensure reassembly and re‑broadcast.
+  - [x] Cross‑lang e2e (ignored by default):
+    - [x] `elo_cross_lang.rs` spawns:
+      - Rust server + JS sender (`examples/js/elo_send_normative.js`) → Rust receiver example (`elo_index_client`) indexes `%ELO` container.
+      - JS server (`examples/js/ws_simple_server.js`) + Rust sender example (`elo_index_client`) → JS receiver (`examples/js/elo_recv_index.js`) confirms receipt and header parsing.
+    - [x] Added Rust example bin `rust/loro-websocket-client/examples/elo_index_client.rs` for joining `%ELO`, sending a normative container, or indexing received containers.
+  - [ ] (Optional when index enabled) `elo_join_backfill.rs`: join after prior updates yields backfill matching TS semantics.
+
+Status: Rust parity for `%ELO` is implemented at the wire level. Protocol enum and parsing utilities are complete with tests; the server accepts `%ELO` joins/updates and broadcasts unchanged. Fragment support is implemented and verified. Header index and selective backfill (by decoded VersionVector) are implemented in Rust without a feature flag via a per‑room `EloRoomDoc`. Server code is refactored to per‑CRDT doc handlers for maintainability. All tests pass in TS and Rust packages.
 
 ### Phase 6 — Docs & Examples
 - [ ] Update `README.md` and add a short `%ELO` usage example.

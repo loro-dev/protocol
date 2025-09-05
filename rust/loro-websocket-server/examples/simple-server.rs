@@ -125,6 +125,7 @@ fn crdt_to_str(crdt: CrdtType) -> &'static str {
         CrdtType::LoroEphemeralStore => "loro_ephemeral",
         CrdtType::Yjs => "yjs",
         CrdtType::YjsAwareness => "yjs_awareness",
+        CrdtType::Elo => "elo",
     }
 }
 

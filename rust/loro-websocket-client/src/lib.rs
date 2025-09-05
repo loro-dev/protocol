@@ -166,7 +166,13 @@ mod tests {
 struct RoomKey { crdt: CrdtType, room: Vec<u8> }
 impl Hash for RoomKey {
     fn hash<H: Hasher>(&self, state: &mut H) {
-        let tag = match self.crdt { CrdtType::Loro => 0u8, CrdtType::LoroEphemeralStore => 1, CrdtType::Yjs => 2, CrdtType::YjsAwareness => 3 };
+        let tag = match self.crdt {
+            CrdtType::Loro => 0u8,
+            CrdtType::LoroEphemeralStore => 1,
+            CrdtType::Yjs => 2,
+            CrdtType::YjsAwareness => 3,
+            CrdtType::Elo => 4,
+        };
         tag.hash(state);
         self.room.hash(state);
     }

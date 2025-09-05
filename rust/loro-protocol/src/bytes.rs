@@ -123,6 +123,10 @@ impl<'a> BytesReader<'a> {
             .map(str::to_owned)
             .map_err(|_| "invalid UTF-8 string".to_string())
     }
+
+    /// Current cursor position (number of bytes consumed so far).
+    #[inline]
+    pub fn position(&self) -> usize { self.off }
 }
 
 #[cfg(test)]

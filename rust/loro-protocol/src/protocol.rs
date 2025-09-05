@@ -18,6 +18,8 @@ pub enum CrdtType {
     Yjs,
     /// "%YAW"
     YjsAwareness,
+    /// "%ELO" (End-to-End Encrypted Loro)
+    Elo,
 }
 
 impl CrdtType {
@@ -27,6 +29,7 @@ impl CrdtType {
             CrdtType::LoroEphemeralStore => *b"%EPH",
             CrdtType::Yjs => *b"%YJS",
             CrdtType::YjsAwareness => *b"%YAW",
+            CrdtType::Elo => *b"%ELO",
         }
     }
 
@@ -36,6 +39,7 @@ impl CrdtType {
             b"%EPH" => Some(CrdtType::LoroEphemeralStore),
             b"%YJS" => Some(CrdtType::Yjs),
             b"%YAW" => Some(CrdtType::YjsAwareness),
+            b"%ELO" => Some(CrdtType::Elo),
             _ => None,
         }
     }
@@ -129,7 +133,7 @@ impl UpdateErrorCode {
 }
 
 /// 8-byte batch ID for fragmenting. On the wire this is exactly 8 raw bytes.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct BatchId(pub [u8; 8]);
 
 impl BatchId {
