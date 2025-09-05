@@ -20,6 +20,16 @@ export interface EloDeltaSpanIndexEntry {
 export class EloDoc {
   // Keyed by decoded peerId string; values kept sorted by start (ascending)
   private spansByPeer: Map<string, EloDeltaSpanIndexEntry[]> = new Map();
+  private verbose: boolean;
+
+  constructor(opts?: { verbose?: boolean }) {
+    const envVerbose =
+      typeof process !== "undefined" &&
+      (process as any).env &&
+      ((process as any).env.ELO_LOG === "1" ||
+        (process as any).env.ELO_LOG === "true");
+    this.verbose = !!(opts?.verbose ?? envVerbose);
+  }
 
   indexBatch(batch: Uint8Array): { ok: true } | { ok: false; error: string } {
     let records: Uint8Array[];
@@ -47,6 +57,12 @@ export class EloDoc {
         if (iv.length !== 12) {
           return { ok: false, error: "Invalid ELO delta span: IV must be 12 bytes" };
         }
+        if (hdr.peerId.length > 64) {
+          return { ok: false, error: "Invalid ELO delta span: peerId must be ≤ 64 bytes" };
+        }
+        if (parsed.keyId && new TextEncoder().encode(parsed.keyId).length > 64) {
+          return { ok: false, error: "Invalid ELO delta span: keyId must be ≤ 64 bytes" };
+        }
 
         const peerKey = this.peerKeyFromBytes(hdr.peerId);
         const list = this.spansByPeer.get(peerKey) ?? [];
@@ -57,6 +73,14 @@ export class EloDoc {
           const kept = this.filterCoveredFromIndex(list, start, end);
           kept.push({ start, end, keyId: parsed.keyId, record: rec });
           this.spansByPeer.set(peerKey, kept);
+          if (this.verbose) {
+            console.info("[ELO] indexed-delta", {
+              peerId: peerKey,
+              start,
+              end,
+              keyId: parsed.keyId,
+            });
+          }
           continue;
         }
 
@@ -68,12 +92,26 @@ export class EloDoc {
         next.push({ start, end, keyId: parsed.keyId, record: rec });
         for (const e of after) next.push(e);
         this.spansByPeer.set(peerKey, next);
+        if (this.verbose) {
+          console.info("[ELO] indexed-delta", {
+            peerId: peerKey,
+            start,
+            end,
+            keyId: parsed.keyId,
+          });
+        }
       } else if (parsed.kind === EloRecordKind.Snapshot) {
         // Snapshot: validate IV length; do not store; server does not need to backfill snapshots
         if (parsed.iv.length !== 12) {
           return { ok: false, error: "Invalid ELO snapshot: IV must be 12 bytes" };
         }
+        if (parsed.keyId && new TextEncoder().encode(parsed.keyId).length > 64) {
+          return { ok: false, error: "Invalid ELO snapshot: keyId must be ≤ 64 bytes" };
+        }
         // no-op
+        if (this.verbose) {
+          console.info("[ELO] received-snapshot", { keyId: parsed.keyId });
+        }
       }
     }
 
@@ -115,6 +153,13 @@ export class EloDoc {
     }
     if (records.length === 0) return [];
     // Package into a single batch (protocol calls this a container)
+    if (this.verbose) {
+      const vvEntries = requester ? [...requester.toJSON().entries()].length : 0;
+      console.info("[ELO] select-backfill", {
+        requesterVvEntries: vvEntries,
+        recordCount: records.length,
+      });
+    }
     return [encodeEloContainer(records)];
   }
 
@@ -154,4 +199,3 @@ export class EloDoc {
     return kept;
   }
 }
-

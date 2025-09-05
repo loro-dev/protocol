@@ -75,10 +75,10 @@ Status: Phase 2 core complete with snapshot packaging and decrypt/apply. Forward
 - [x] Tests: e2e with two `%ELO` clients sharing a key; verify join/backfill and live updates.
 
 ### Phase 4 — Test Vectors, Limits, Edge Cases
-- [ ] Add normative AES‑GCM vector from `protocol-e2ee.md` as a unit test (fix IV, key, AAD; verify `ct`).
-- [ ] Fragmentation: test large container bytes fragmented and reassembled path.
-- [ ] Error paths: invalid header (iv size, keyId length, peerId length), payload too large, decrypt failure, unknown key.
-- [ ] Observability: ensure server logs anonymized header info only; never log `ct`.
+- [x] Add normative AES‑GCM vector from `protocol-e2ee.md` as a unit test (fix IV, key, AAD; verify `ct`).
+- [x] Fragmentation: test large container bytes fragmented and reassembled path.
+- [x] Error paths: invalid header (iv size, keyId length, peerId length), payload too large, decrypt failure, unknown key.
+- [x] Observability: ensure server logs anonymized header info only; never log `ct`.
 
 ### Phase 5 — Rust Parity (follow‑up)
 - [ ] `rust/loro-protocol`: add `%ELO` to enum + magic; expose helpers for container header parsing (no crypto).

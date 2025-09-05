@@ -21,6 +21,7 @@ import {
   DocUpdateFragmentHeader,
   DocUpdateFragment,
   bytesToHex,
+  MAX_MESSAGE_SIZE,
 } from "loro-protocol";
 import {
   type CrdtDoc,
@@ -58,7 +59,12 @@ interface ClientConnection {
   rooms: Set<string>;
   fragments: Map<
     HexString,
-    { data: Uint8Array[]; totalSize: number; received: number }
+    {
+      data: Uint8Array[];
+      totalSize: number;
+      received: number;
+      header: DocUpdateFragmentHeader;
+    }
   >;
   permissions: Map<string, Permission>; // roomKey -> permission
 }
@@ -276,6 +282,21 @@ export class SimpleServer {
     message: DocUpdate
   ): Promise<void> {
     try {
+      // Guard: reject payloads that exceed max update size
+      // (Clients fragment large updates; this is a safety net.)
+      const oversized = message.updates.some(u => u.length > MAX_MESSAGE_SIZE);
+      if (oversized) {
+        const updateError: UpdateError = {
+          type: MessageType.UpdateError,
+          crdt: message.crdt,
+          roomId: message.roomId,
+          code: UpdateErrorCode.PayloadTooLarge,
+          message: `Update payload exceeds ${MAX_MESSAGE_SIZE} bytes`,
+        };
+        this.sendMessage(client.ws, updateError);
+        return;
+      }
+
       const roomKey = this.getRoomKey(message.roomId, message.crdt);
 
       // Check if client has joined this room
@@ -367,6 +388,7 @@ export class SimpleServer {
       data: Array.from({ length: message.fragmentCount }),
       totalSize: message.totalSizeBytes,
       received: 0,
+      header: message,
     });
   }
 
@@ -402,15 +424,81 @@ export class SimpleServer {
         offset += fragment.length;
       }
 
-      // Process as a regular DocUpdate (permission check will happen there)
-      const docUpdate: DocUpdate = {
-        type: MessageType.DocUpdate,
-        crdt: message.crdt,
-        roomId: message.roomId,
-        updates: [totalData],
-      };
+      // Apply updates with permission checks, then broadcast the original
+      // fragment header and fragments to other clients to avoid oversize
+      // DocUpdate messages.
+      const roomKey = this.getRoomKey(message.roomId, message.crdt);
+      if (!client.rooms.has(roomKey)) {
+        const error: UpdateError = {
+          type: MessageType.UpdateError,
+          crdt: message.crdt,
+          roomId: message.roomId,
+          code: UpdateErrorCode.PermissionDenied,
+          message: "Must join room before sending fragments",
+          batchId: message.batchId,
+        };
+        this.sendMessage(client.ws, error);
+        return;
+      }
 
-      await this.handleDocUpdate(client, docUpdate);
+      const permission = client.permissions.get(roomKey);
+      if (permission !== "write") {
+        const error: UpdateError = {
+          type: MessageType.UpdateError,
+          crdt: message.crdt,
+          roomId: message.roomId,
+          code: UpdateErrorCode.PermissionDenied,
+          message: "Write permission required to update document",
+          batchId: message.batchId,
+        };
+        this.sendMessage(client.ws, error);
+        client.fragments.delete(message.batchId);
+        return;
+      }
+
+      // Apply to server-side CRDT state
+      const roomDoc = await this.getOrCreateRoomDocument(
+        message.roomId,
+        message.crdt
+      );
+      const res = roomDoc.doc.applyUpdates([totalData]);
+      if (!res.ok) {
+        const error: UpdateError = {
+          type: MessageType.UpdateError,
+          crdt: message.crdt,
+          roomId: message.roomId,
+          code: UpdateErrorCode.InvalidUpdate,
+          message: res.error,
+          batchId: message.batchId,
+        };
+        this.sendMessage(client.ws, error);
+        client.fragments.delete(message.batchId);
+        return;
+      }
+      if (roomDoc.doc.shouldPersist()) {
+        roomDoc.dirty = true;
+      }
+
+      // Broadcast original fragments to other clients in the room
+      const header = client.fragments.get(message.batchId)!.header;
+      this.wss?.clients.forEach(ws => {
+        const c = this.clients.get(ws);
+        if (!c || c === client) return;
+        if (!c.rooms.has(roomKey)) return;
+        this.sendMessage(ws, header);
+        for (let i = 0; i < batch.data.length; i++) {
+          const fragMsg: DocUpdateFragment = {
+            type: MessageType.DocUpdateFragment,
+            crdt: message.crdt,
+            roomId: message.roomId,
+            batchId: message.batchId,
+            index: i,
+            fragment: batch.data[i]!,
+          };
+          this.sendMessage(ws, fragMsg);
+        }
+      });
+
       client.fragments.delete(message.batchId);
     }
   }
