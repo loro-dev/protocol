@@ -119,9 +119,17 @@ Status: Phase 2 core complete with snapshot packaging and decrypt/apply. Forward
 Status: Rust parity for `%ELO` is implemented at the wire level. Protocol enum and parsing utilities are complete with tests; the server accepts `%ELO` joins/updates and broadcasts unchanged. Fragment support is implemented and verified. Header index and selective backfill (by decoded VersionVector) are implemented in Rust without a feature flag via a per‑room `EloRoomDoc`. Server code is refactored to per‑CRDT doc handlers for maintainability. All tests pass in TS and Rust packages.
 
 ### Phase 6 — Docs & Examples
-- [ ] Update `README.md` and add a short `%ELO` usage example.
-- [ ] Cross‑link `protocol-e2ee.md`; document adaptor config and key‑hook expectations.
-- [ ] Call out non‑goals: key agreement, key escrow, server‑side re‑encryption, content addressing.
+- [x] Update `README.md` and add a short `%ELO` usage example.
+  - Added Node example using `LoroWebsocketClient` + `EloLoroAdaptor` with a provided 32‑byte key.
+  - Added cross‑language test instructions and `pnpm run test:cross-lang`.
+- [x] Cross‑link `protocol-e2ee.md`; document adaptor config and key‑hook expectations.
+  - Described `getPrivateKey()` and IV requirements (12‑byte, unique per encryption); noted adaptor `ivFactory` testing hook.
+- [x] Call out non‑goals: key agreement, key escrow, server‑side re‑encryption, content addressing.
+  - Emphasized server never decrypts; `%ELO` headers are plaintext only for routing/backfill.
+
+Additions (developer convenience):
+- Thin TS wrappers in `packages/loro-websocket/src/wrappers/` for starting the server, sending a real `%ELO` update, and validating decrypted content.
+- Cross‑lang test now asserts final document state equality in both TS→Rust and Rust→TS paths.
 
 ---
 
