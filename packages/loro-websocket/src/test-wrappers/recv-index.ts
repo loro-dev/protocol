@@ -5,7 +5,7 @@ import { pathToFileURL } from "node:url";
 async function main() {
   const url = process.argv[2];
   const roomId = (process.argv[3] ?? "room-elo");
-  if (!url) throw new Error("usage: node dist/wrappers/recv-index.js <ws_url> [roomId]");
+  if (!url) throw new Error("usage: node dist/test-wrappers/recv-index.js <ws_url> [roomId]");
   console.log(`[wrapper] recv-index connecting to ${url}, room=${roomId}`);
   const ws = new WebSocket(url);
   await new Promise<void>((resolve, reject) => {
@@ -24,7 +24,7 @@ async function main() {
       if (msg.type === MessageType.DocUpdate) {
         console.log(`[wrapper] recv-index received DocUpdate (${msg.updates.length})`);
         clearTimeout(to);
-        try { ws.close(); } catch {}
+        try { ws.close(); } catch { }
         resolve();
       }
     });

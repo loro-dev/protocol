@@ -6,7 +6,7 @@
     "build": "pnpm -r build",
     "dev": "pnpm -r dev",
     "test": "pnpm -r test",
-    "test:cross-lang": "cargo test -p loro-websocket-server --test elo_cross_lang -- --ignored --nocapture",
+    "test:cross-lang": "cd rust && cargo test -p loro-websocket-server --test elo_cross_lang -- --ignored --nocapture",
     "lint": "oxlint --type-aware",
     "typecheck": "pnpm -r typecheck",
     "clean": "pnpm -r clean",

@@ -129,10 +129,10 @@ pnpm run test:cross-lang
 
 This will:
 - Run the Rust cross‑lang e2e test (`rust/loro-websocket-server/tests/elo_cross_lang.rs`) with logs.
-- Spawn thin TS wrappers via `pnpm exec tsx`:
-  - `packages/loro-websocket/src/wrappers/start-simple-server.ts`
-  - `packages/loro-websocket/src/wrappers/send-elo-normative.ts`
-  - `packages/loro-websocket/src/wrappers/recv-elo-doc.ts`
+- Spawn thin TS test-wrappers via `pnpm exec tsx`:
+  - `packages/loro-websocket/src/test-wrappers/start-simple-server.ts`
+  - `packages/loro-websocket/src/test-wrappers/send-elo-normative.ts`
+  - `packages/loro-websocket/src/test-wrappers/recv-elo-doc.ts`
 - Use the Rust example `rust/loro-websocket-client/examples/elo_index_client.rs` which encrypts/decrypts real `%ELO` containers.
 
 Requirements:

@@ -1,5 +1,5 @@
-use std::{io, path::PathBuf, process::Stdio, time::Duration};
 use std::sync::{Mutex, OnceLock};
+use std::{io, path::PathBuf, process::Stdio, time::Duration};
 use tokio::net::TcpListener;
 use tokio::process::{Child, Command};
 use tokio::time::timeout;
@@ -20,7 +20,10 @@ fn workspace_pkg_dir() -> PathBuf {
 async fn run_tsx_in_pkg(ts_file_rel: &str, extra: &[&str]) -> io::Result<std::process::ExitStatus> {
     // Prefer pnpm exec in package dir; fallback to npx
     let pkg_dir = workspace_pkg_dir();
-    eprintln!("[test] run_tsx_in_pkg: pnpm exec tsx {ts_file_rel} {}", extra.join(" "));
+    eprintln!(
+        "[test] run_tsx_in_pkg: pnpm exec tsx {ts_file_rel} {}",
+        extra.join(" ")
+    );
     let status = Command::new("pnpm")
         .current_dir(&pkg_dir)
         .arg("exec")
@@ -36,7 +39,9 @@ async fn run_tsx_in_pkg(ts_file_rel: &str, extra: &[&str]) -> io::Result<std::pr
             let file = workspace_pkg_dir().join(ts_file_rel);
             let mut all_args: Vec<String> = Vec::with_capacity(1 + extra.len());
             all_args.push(file.to_string_lossy().to_string());
-            for a in extra { all_args.push((*a).to_string()); }
+            for a in extra {
+                all_args.push((*a).to_string());
+            }
             Command::new("npx").arg("tsx").args(all_args).status().await
         }
     }
@@ -45,7 +50,10 @@ async fn run_tsx_in_pkg(ts_file_rel: &str, extra: &[&str]) -> io::Result<std::pr
 async fn spawn_tsx_in_pkg(ts_file_rel: &str, extra: &[&str]) -> io::Result<Child> {
     // Long-running process: try pnpm exec first, else npx
     let pkg_dir = workspace_pkg_dir();
-    eprintln!("[test] spawn_tsx_in_pkg: pnpm exec tsx {ts_file_rel} {}", extra.join(" "));
+    eprintln!(
+        "[test] spawn_tsx_in_pkg: pnpm exec tsx {ts_file_rel} {}",
+        extra.join(" ")
+    );
     let child = Command::new("pnpm")
         .current_dir(&pkg_dir)
         .arg("exec")
@@ -62,7 +70,9 @@ async fn spawn_tsx_in_pkg(ts_file_rel: &str, extra: &[&str]) -> io::Result<Child
             let file = workspace_pkg_dir().join(ts_file_rel);
             let mut all_args: Vec<String> = Vec::with_capacity(1 + extra.len());
             all_args.push(file.to_string_lossy().to_string());
-            for a in extra { all_args.push((*a).to_string()); }
+            for a in extra {
+                all_args.push((*a).to_string());
+            }
             Command::new("npx")
                 .arg("tsx")
                 .args(all_args)
@@ -87,15 +97,24 @@ async fn js_client_to_rust_client_via_rust_server() {
     let ws_url = format!("ws://127.0.0.1:{}", addr.port());
     eprintln!("[test] Starting Rust server at {ws_url}");
     // Start server
-    tokio::spawn(async move { let _ = server::serve_incoming(listener).await; });
+    tokio::spawn(async move {
+        let _ = server::serve_incoming(listener).await;
+    });
 
     // Start Rust receiver example
     eprintln!("[test] Spawning Rust receiver example at {ws_url}");
     let mut recv = Command::new("cargo")
         .args([
-            "run", "--quiet", "-p", "loro-websocket-client",
-            "--example", "elo_index_client", "--",
-            "receiver", &ws_url, "room-elo"
+            "run",
+            "--quiet",
+            "-p",
+            "loro-websocket-client",
+            "--example",
+            "elo_index_client",
+            "--",
+            "receiver",
+            &ws_url,
+            "room-elo",
         ])
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -104,12 +123,20 @@ async fn js_client_to_rust_client_via_rust_server() {
 
     // Start TS sender wrapper via tsx
     eprintln!("[test] Running JS sender wrapper with {ws_url}");
-    let status = run_tsx_in_pkg("src/wrappers/send-elo-normative.ts", &[&ws_url, "room-elo"]).await.expect("spawn tsx sender");
+    let status = run_tsx_in_pkg(
+        "src/test-wrappers/send-elo-normative.ts",
+        &[&ws_url, "room-elo"],
+    )
+    .await
+    .expect("spawn tsx sender");
     assert!(status.success(), "tsx sender failed");
 
     // Wait for receiver to index and exit
     eprintln!("[test] Waiting for Rust receiver to exit (10s)");
-    let rc = timeout(Duration::from_secs(10), recv.wait()).await.expect("receiver timeout").expect("receiver wait");
+    let rc = timeout(Duration::from_secs(10), recv.wait())
+        .await
+        .expect("receiver timeout")
+        .expect("receiver wait");
     assert!(rc.success(), "receiver failed");
 }
 
@@ -128,9 +155,12 @@ async fn rust_client_to_js_client_via_js_server() {
 
     // Start TS WS server on that port via tsx
     eprintln!("[test] Spawning JS WS server at ws://127.0.0.1:{port}");
-    let mut child = spawn_tsx_in_pkg("src/wrappers/start-simple-server.ts", &["127.0.0.1", &port.to_string()])
-        .await
-        .expect("spawn js server");
+    let mut child = spawn_tsx_in_pkg(
+        "src/test-wrappers/start-simple-server.ts",
+        &["127.0.0.1", &port.to_string()],
+    )
+    .await
+    .expect("spawn js server");
     let ws_url = format!("ws://127.0.0.1:{}", port);
 
     // Actively wait for the port to accept connections to avoid races
@@ -138,9 +168,14 @@ async fn rust_client_to_js_client_via_js_server() {
     eprintln!("[test] Waiting for JS server to accept connections (up to 3s)");
     loop {
         match tokio::net::TcpStream::connect(("127.0.0.1", port)).await {
-            Ok(_) => { eprintln!("[test] JS server is listening"); break },
+            Ok(_) => {
+                eprintln!("[test] JS server is listening");
+                break;
+            }
             Err(_) => {
-                if tokio::time::Instant::now() > ready_deadline { break; }
+                if tokio::time::Instant::now() > ready_deadline {
+                    break;
+                }
                 tokio::time::sleep(Duration::from_millis(50)).await;
             }
         }
@@ -148,15 +183,27 @@ async fn rust_client_to_js_client_via_js_server() {
 
     // Start JS receiver that decrypts and validates doc content
     eprintln!("[test] Spawning JS ELO receiver wrapper with {ws_url}");
-    let mut js_recv = spawn_tsx_in_pkg("src/wrappers/recv-elo-doc.ts", &[&ws_url, "room-elo", "hi"]).await.expect("spawn tsx recv");
+    let mut js_recv = spawn_tsx_in_pkg(
+        "src/test-wrappers/recv-elo-doc.ts",
+        &[&ws_url, "room-elo", "hi"],
+    )
+    .await
+    .expect("spawn tsx recv");
 
     // Start Rust sender example
     eprintln!("[test] Spawning Rust sender example at {ws_url}");
     let status = Command::new("cargo")
         .args([
-            "run", "--quiet", "-p", "loro-websocket-client",
-            "--example", "elo_index_client", "--",
-            "sender", &ws_url, "room-elo"
+            "run",
+            "--quiet",
+            "-p",
+            "loro-websocket-client",
+            "--example",
+            "elo_index_client",
+            "--",
+            "sender",
+            &ws_url,
+            "room-elo",
         ])
         .status()
         .await
@@ -165,7 +212,10 @@ async fn rust_client_to_js_client_via_js_server() {
 
     // Wait for JS receiver to exit
     eprintln!("[test] Waiting for JS receiver to exit (10s)");
-    let rc = timeout(Duration::from_secs(10), js_recv.wait()).await.expect("js recv timeout").expect("js recv wait");
+    let rc = timeout(Duration::from_secs(10), js_recv.wait())
+        .await
+        .expect("js recv timeout")
+        .expect("js recv wait");
     assert!(rc.success(), "js receiver failed");
 
     // Kill server
