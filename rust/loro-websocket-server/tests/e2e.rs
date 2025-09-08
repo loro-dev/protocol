@@ -90,3 +90,105 @@ async fn workspaces_are_isolated() {
 
     server_task.abort();
 }
+
+#[tokio::test(flavor = "current_thread")]
+async fn e2e_sync_two_clients_loro_adaptor_roundtrip() {
+    // Start server on ephemeral port with auth
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let server_task = tokio::spawn(async move {
+        let cfg = server::ServerConfig {
+            handshake_auth: Some(Arc::new(|_ws, token| token == Some("secret"))),
+            ..Default::default()
+        };
+        server::serve_incoming_with_config(listener, cfg).await.unwrap();
+    });
+
+    let url = format!("ws://{}/ws-loro-adaptor?token=secret", addr);
+    let c1 = LoroWebsocketClient::connect(&url).await.unwrap();
+    let c2 = LoroWebsocketClient::connect(&url).await.unwrap();
+
+    // Two docs
+    let doc1 = Arc::new(tokio::sync::Mutex::new(loro_crdt::LoroDoc::new()));
+    let doc2 = Arc::new(tokio::sync::Mutex::new(loro_crdt::LoroDoc::new()));
+
+    // Join using the generic adaptor path (LoroAdaptor)
+    let room_id = "room-loro-adaptor";
+    let _room1 = c1
+        .join_loro_with_adaptor(room_id, doc1.clone())
+        .await
+        .unwrap();
+    let _room2 = c2
+        .join_loro_with_adaptor(room_id, doc2.clone())
+        .await
+        .unwrap();
+
+    // Apply change on doc1 and commit to trigger local update
+    {
+        let d1 = doc1.lock().await;
+        let t = d1.get_text("text");
+        t.insert(0, "hello").unwrap();
+        d1.commit();
+    }
+
+    // Give time for async delivery and check doc2
+    tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    let got = { doc2.lock().await.get_text("text").to_string() };
+    assert_eq!(got, "hello");
+
+    server_task.abort();
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn e2e_sync_two_clients_elo_adaptor_roundtrip() {
+    // Start server on ephemeral port with auth
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let server_task = tokio::spawn(async move {
+        let cfg = server::ServerConfig {
+            handshake_auth: Some(Arc::new(|_ws, token| token == Some("secret"))),
+            ..Default::default()
+        };
+        server::serve_incoming_with_config(listener, cfg).await.unwrap();
+    });
+
+    // %ELO lives under its own workspace path
+    let url = format!("ws://{}/ws-elo-adaptor?token=secret", addr);
+    let c1 = LoroWebsocketClient::connect(&url).await.unwrap();
+    let c2 = LoroWebsocketClient::connect(&url).await.unwrap();
+
+    let doc1 = Arc::new(tokio::sync::Mutex::new(loro_crdt::LoroDoc::new()));
+    let doc2 = Arc::new(tokio::sync::Mutex::new(loro_crdt::LoroDoc::new()));
+
+    // Fixed test key (32 bytes)
+    const KEY: [u8; 32] = [
+        0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e,
+        0x0f, 0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18, 0x19, 0x1a, 0x1b, 0x1c, 0x1d,
+        0x1e, 0x1f,
+    ];
+
+    // Join both clients in the same %ELO room via adaptor
+    let room_id = "room-elo-adaptor";
+    let _r1 = c1
+        .join_elo_with_adaptor(room_id, doc1.clone(), "k1", KEY)
+        .await
+        .unwrap();
+    let _r2 = c2
+        .join_elo_with_adaptor(room_id, doc2.clone(), "k1", KEY)
+        .await
+        .unwrap();
+
+    // Mutate doc1 after join; adaptor encrypts and sends container update
+    {
+        let d1 = doc1.lock().await;
+        let t = d1.get_text("text");
+        t.insert(0, "hello").unwrap();
+        d1.commit();
+    }
+
+    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    let got = { doc2.lock().await.get_text("text").to_string() };
+    assert_eq!(got, "hello");
+
+    server_task.abort();
+}
