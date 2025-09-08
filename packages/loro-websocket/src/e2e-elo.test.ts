@@ -10,6 +10,8 @@ import {
   tryDecode,
   MessageType,
   UpdateErrorCode,
+  type ProtocolMessage,
+  type UpdateError,
 } from "loro-protocol";
 
 // Make WebSocket available globally for the client
@@ -300,22 +302,22 @@ describe("E2E: %ELO decrypt failure and unknown key handling", () => {
 async function waitForOpen(ws: WebSocket): Promise<void> {
   if (ws.readyState === WebSocket.OPEN) return;
   await new Promise<void>((resolve, reject) => {
-    const t = setTimeout(() => reject(new Error("timeout")), 5000);
+    const t = setTimeout(() => { reject(new Error("timeout")); }, 5000);
     ws.once("open", () => {
       clearTimeout(t);
       resolve();
     });
-    ws.once("error", err => {
+    ws.once("error", (err: Error) => {
       clearTimeout(t);
-      reject(err as any);
+      reject(err);
     });
   });
 }
 
 async function waitForJoinOk(ws: WebSocket): Promise<void> {
   await new Promise<void>((resolve, reject) => {
-    const t = setTimeout(() => reject(new Error("timeout")), 5000);
-    ws.on("message", (data: any) => {
+    const t = setTimeout(() => { reject(new Error("timeout")); }, 5000);
+    ws.on("message", (data: unknown) => {
       try {
         const msg = tryDecodeMsg(data);
         if (msg && msg.type === MessageType.JoinResponseOk) {
@@ -327,25 +329,25 @@ async function waitForJoinOk(ws: WebSocket): Promise<void> {
   });
 }
 
-async function waitForUpdateError(ws: WebSocket): Promise<any> {
+async function waitForUpdateError(ws: WebSocket): Promise<UpdateError> {
   return await new Promise((resolve, reject) => {
-    const t = setTimeout(() => reject(new Error("timeout")), 5000);
-    ws.on("message", (data: any) => {
+    const t = setTimeout(() => { reject(new Error("timeout")); }, 5000);
+    ws.on("message", (data: unknown) => {
       try {
         const msg = tryDecodeMsg(data);
         if (msg && msg.type === MessageType.UpdateError) {
           clearTimeout(t);
-          resolve(msg);
+          resolve(msg as UpdateError);
         }
       } catch {}
     });
   });
 }
 
-function tryDecodeMsg(data: any): any | null {
+function tryDecodeMsg(data: unknown): ProtocolMessage | null {
   try {
-    const u8 = data instanceof Buffer ? new Uint8Array(data) : new Uint8Array(data);
-    return tryDecode(u8);
+    const u8 = data instanceof Buffer ? new Uint8Array(data) : new Uint8Array(data as ArrayBuffer);
+    return tryDecode(u8) ?? null;
   } catch {
     return null;
   }

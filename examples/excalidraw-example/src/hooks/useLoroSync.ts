@@ -134,7 +134,7 @@ export function useLoroSync({
       unsubscribeEphemeral();
       onEphemeralThrottled.cancel();
       // Leave rooms and cleanup adaptors
-      Promise.allSettled(rooms.map(r => r.destroy())).finally(() => {
+      void Promise.allSettled(rooms.map(r => r.destroy())).finally(() => {
         setIsConnected(false);
       });
       // Adaptor destroy will also clean underlying stores/docs, but ensure store is destroyed

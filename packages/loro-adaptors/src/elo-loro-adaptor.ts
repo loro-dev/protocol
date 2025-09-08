@@ -16,7 +16,7 @@ import {
 } from "loro-protocol";
 
 // Minimal placeholder to avoid requiring DOM lib in this package
-type CryptoKey = unknown;
+interface CryptoKey {}
 
 export interface EloLoroAdaptorConfig {
   getPrivateKey: (

@@ -9,14 +9,14 @@ async function main() {
   console.log(`[wrapper] recv-index connecting to ${url}, room=${roomId}`);
   const ws = new WebSocket(url);
   await new Promise<void>((resolve, reject) => {
-    ws.once("open", () => resolve());
+    ws.once("open", () => { resolve(); });
     ws.once("error", reject);
   });
-  const join: ProtocolMessage = { type: MessageType.JoinRequest, crdt: CrdtType.Elo, roomId: Buffer.from(roomId), auth: new Uint8Array(), version: new Uint8Array() } as any;
-  ws.send(Buffer.from(await encode(join)));
+  const join: ProtocolMessage = { type: MessageType.JoinRequest, crdt: CrdtType.Elo, roomId: Buffer.from(roomId), auth: new Uint8Array(), version: new Uint8Array() };
+  ws.send(Buffer.from(encode(join)));
   let ok = false;
   await new Promise<void>((resolve, reject) => {
-    const to = setTimeout(() => reject(new Error("timeout")), 10000);
+    const to = setTimeout(() => { reject(new Error("timeout")); }, 10000);
     ws.on("message", (data: Buffer) => {
       const msg = tryDecode(new Uint8Array(data));
       if (!msg) return;

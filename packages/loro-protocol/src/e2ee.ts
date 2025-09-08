@@ -134,8 +134,10 @@ export function parseEloRecordHeader(
 
 // Crypto helpers (Web Crypto across browsers/Node/CF Workers)
 function getSubtle(): SubtleCrypto {
-  const g: any = globalThis as any;
-  if (g.crypto && g.crypto.subtle) return g.crypto.subtle as SubtleCrypto;
+  const g = globalThis as unknown as {
+    crypto?: { subtle?: SubtleCrypto };
+  };
+  if (g.crypto && g.crypto.subtle) return g.crypto.subtle;
   throw new Error("Web Crypto not available in this environment");
 }
 

@@ -15,7 +15,7 @@ async function main() {
   const roomId = process.argv[3] ?? "room-elo";
   const expected = process.argv[4] ?? "hi";
   if (!url) throw new Error("usage: tsx src/test-wrappers/recv-elo-doc.ts <ws_url> [roomId] [expected]");
-  (globalThis as any).WebSocket = NodeWebSocket as unknown as typeof WebSocket;
+  globalThis.WebSocket = NodeWebSocket as unknown as typeof WebSocket;
   console.log(`[wrapper] recv-elo-doc: connecting to ${url}, room=${roomId}`);
 
   const key = hexToBytes(
@@ -49,4 +49,3 @@ if (isEntrypoint) {
   // eslint-disable-next-line unicorn/prefer-top-level-await
   main().catch(err => { console.error(err); process.exit(1); });
 }
-

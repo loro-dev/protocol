@@ -18,7 +18,7 @@ async function main() {
   if (!url) throw new Error("usage: node dist/test-wrappers/send-elo-normative.js <ws_url> [roomId]");
 
   // Provide WebSocket implementation for the client in Node
-  (globalThis as any).WebSocket = NodeWebSocket as unknown as typeof WebSocket;
+  globalThis.WebSocket = NodeWebSocket as unknown as typeof WebSocket;
   console.log(`[wrapper] send-elo: connecting to ${url}, room=${roomId}`);
 
   // Deterministic 32-byte key (matches normative tests)

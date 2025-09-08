@@ -25,9 +25,9 @@ export class EloDoc {
   constructor(opts?: { verbose?: boolean }) {
     const envVerbose =
       typeof process !== "undefined" &&
-      (process as any).env &&
-      ((process as any).env.ELO_LOG === "1" ||
-        (process as any).env.ELO_LOG === "true");
+      (process as unknown as { env?: Record<string, string | undefined> }).env &&
+      (((process as unknown as { env?: Record<string, string | undefined> }).env!.ELO_LOG === "1") ||
+        ((process as unknown as { env?: Record<string, string | undefined> }).env!.ELO_LOG === "true"));
     this.verbose = !!(opts?.verbose ?? envVerbose);
   }
 

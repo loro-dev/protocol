@@ -15,9 +15,15 @@ const server = new SimpleServer({
   },
 });
 
-server.start().then(() => {
-  console.log("WebSocket server running on ws://localhost:8080");
-});
+void server
+  .start()
+  .then(() => {
+    console.log("WebSocket server running on ws://localhost:8080");
+  })
+  .catch(err => {
+    console.error("Failed to start server:", err);
+    process.exit(1);
+  });
 
 // Handle graceful shutdown
 process.on("SIGINT", async () => {
