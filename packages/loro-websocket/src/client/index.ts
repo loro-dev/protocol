@@ -61,7 +61,7 @@ export class LoroWebsocketClient {
   }> = [];
 
   constructor(
-    private ops: { url: string; pingIntervalMs?: number; disablePing?: boolean }
+    private ops: { url: string; pingIntervalMs?: number; disablePing?: boolean, onWsClose?: () => void }
   ) {
     this.connectedPromise = new Promise<void>((resolve, reject) => {
       this.ws = new WebSocket(this.ops.url);
@@ -100,6 +100,7 @@ export class LoroWebsocketClient {
     // Clear timers and pending waiters on close
     this.ws.addEventListener('close', () => {
       this.clearPingTimer();
+      this.ops.onWsClose?.();
       this.rejectAllPingWaiters(new Error("WebSocket closed"));
     });
   }
