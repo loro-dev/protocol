@@ -1,0 +1,20 @@
+{
+  "plugins": [
+    "node-workspace"
+  ],
+  "include-component-in-tag": true,
+  "bump-minor-pre-major": true,
+  "bump-patch-for-minor-pre-major": true,
+  "packages": {
+    "packages/loro-protocol": {
+      "release-type": "node"
+    },
+    "packages/loro-websocket": {
+      "release-type": "node"
+    },
+    "packages/loro-adaptors": {
+      "release-type": "node"
+    }
+  }
+}
+
