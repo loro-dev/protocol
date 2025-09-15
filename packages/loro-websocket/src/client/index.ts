@@ -46,15 +46,75 @@ interface ActiveRoom {
   handler: InternalRoomHandler;
 }
 
+/**
+ * The websocket client's high-level connection status.
+ * - `Connecting`: initial connect or a manual `connect()` in progress.
+ * - `Connected`: the websocket is open and usable.
+ * - `Reconnecting`: the connection dropped unexpectedly; the client is retrying with exponential backoff.
+ * - `Disconnected`: the client is not connected and won't auto-reconnect (call `connect()` to resume).
+ */
+export const ClientStatus = {
+  Connecting: "connecting",
+  Connected: "connected",
+  Reconnecting: "reconnecting",
+  Disconnected: "disconnected",
+} as const;
+export type ClientStatusValue =
+  (typeof ClientStatus)[keyof typeof ClientStatus];
+
+/**
+ * Options for `LoroWebsocketClient`.
+ *
+ * Behavior summary:
+ * - The client auto-connects on construction and retries on unexpected closures with an exponential backoff.
+ * - Call `close()` to stop auto-reconnect and move to `Disconnected`. Call `connect()` to resume.
+ * - Pings are sent periodically to keep the connection alive; `latency` estimates are updated on pong.
+ */
+export interface LoroWebsocketClientOptions {
+  /** WebSocket URL (ws:// or wss://). */
+  url: string;
+  /** Optional custom ping interval. Defaults to 30s. Set with `disablePing` to stop timers. */
+  pingIntervalMs?: number;
+  /** Disable periodic ping/pong entirely. */
+  disablePing?: boolean;
+  /** Optional callback for low-level ws close (before status transitions). */
+  onWsClose?: () => void;
+}
+
+/**
+ * Loro websocket client with auto-reconnect, connection status events, and latency tracking.
+ *
+ * Status model:
+ * - `Connected`: ws open.
+ * - `Reconnecting`: closed unexpectedly; client retries with exponential backoff. Pauses while offline; resumes on `online`.
+ * - `Disconnected`: closed via `close()`; client will not reconnect until `connect()` is called again.
+ * - `Connecting`: initial or manual connect in progress.
+ *
+ * Events:
+ * - `onStatusChange(cb)`: called whenever status changes.
+ * - `onLatency(cb)`: called when a new RTT estimate is measured from ping/pong.
+ */
 export class LoroWebsocketClient {
   private ws!: WebSocket;
-  private connectedPromise: Promise<void>;
+  private connectedPromise!: Promise<void>;
+  private resolveConnected?: () => void;
+  private rejectConnected?: (e: Error) => void;
+  private status: ClientStatusValue = ClientStatus.Connecting;
+  private statusListeners = new Set<(s: ClientStatusValue) => void>();
+  private latencyListeners = new Set<(ms: number) => void>();
+  private lastLatencyMs?: number;
+  private awaitingPongSince?: number;
+
   private pendingRooms: Map<string, PendingRoom> = new Map();
   private activeRooms: Map<string, ActiveRoom> = new Map();
   // Buffer for %ELO only: backfills can arrive immediately after JoinResponseOk
   private preJoinUpdates: Map<string, Uint8Array[]> = new Map();
   private fragmentBatches: Map<string, FragmentBatch> = new Map();
   private roomAdaptors: Map<string, CrdtDocAdaptor> = new Map();
+  // Track roomId for each active id so we can rejoin on reconnect
+  private roomIds: Map<string, string> = new Map();
+  private roomAuth: Map<string, Uint8Array | undefined> = new Map();
+
   private pingTimer?: ReturnType<typeof setInterval>;
   private pingWaiters: Array<{
     resolve: () => void;
@@ -62,49 +122,232 @@ export class LoroWebsocketClient {
     timeoutId: ReturnType<typeof setTimeout>;
   }> = [];
 
-  constructor(
-    private ops: { url: string; pingIntervalMs?: number; disablePing?: boolean, onWsClose?: () => void }
-  ) {
-    this.connectedPromise = new Promise<void>((resolve, reject) => {
-      this.ws = new WebSocket(this.ops.url);
-      // Ensure binary frames surface as ArrayBuffer for consistent handling
+  // Reconnect controls
+  private shouldReconnect = true;
+  private reconnectAttempts = 0;
+  private reconnectTimer?: ReturnType<typeof setTimeout>;
+  private isOnline = true;
+
+  constructor(private ops: LoroWebsocketClientOptions) {
+    // Wire browser network events if available
+    if (
+      typeof window !== "undefined" &&
+      typeof window.addEventListener === "function"
+    ) {
+      window.addEventListener("online", this.handleOnline);
+      window.addEventListener("offline", this.handleOffline);
+    }
+
+    // Start initial connection
+    this.connectedPromise = this.createConnectedPromise();
+    this.connect();
+  }
+
+  private createConnectedPromise() {
+    return new Promise<void>((resolve, reject) => {
+      this.resolveConnected = resolve;
+      this.rejectConnected = reject;
+    });
+  }
+
+  /** Current client status. */
+  getStatus(): ClientStatusValue {
+    return this.status;
+  }
+
+  /** Latest measured RTT in ms (if any). */
+  getLatency(): number | undefined {
+    return this.lastLatencyMs;
+  }
+
+  /** Subscribe to status changes. Returns an unsubscribe function. */
+  onStatusChange(cb: (s: ClientStatusValue) => void): () => void {
+    this.statusListeners.add(cb);
+    // Emit current immediately to inform subscribers
+    try {
+      cb(this.status);
+    } catch {}
+    return () => this.statusListeners.delete(cb);
+  }
+
+  /** Subscribe to latency updates (RTT via ping/pong). Returns an unsubscribe function. */
+  onLatency(cb: (ms: number) => void): () => void {
+    this.latencyListeners.add(cb);
+    if (this.lastLatencyMs != null) {
       try {
-        this.ws.binaryType = "arraybuffer";
-      } catch { }
-      this.ws.addEventListener('open', () => {
-        this.startPingTimer();
-        resolve();
-      });
-      this.ws.addEventListener('error', () => {
-        reject(new Error("WebSocket connection failed"));
-      });
-      this.ws.addEventListener('message', async (event: MessageEvent<string | ArrayBuffer>) => {
-        // Keepalive handling: respond to "ping" text, ignore/fulfill on "pong"
-        if (typeof event.data === "string") {
-          if (event.data === "ping") {
-            this.ws.send("pong");
-            return;
-          }
-          if (event.data === "pong") {
-            this.handlePong();
-            return;
-          }
-          // Ignore other unexpected text frames
-          return;
-        }
+        cb(this.lastLatencyMs);
+      } catch {}
+    }
+    return () => this.latencyListeners.delete(cb);
+  }
 
-        const dataU8 = new Uint8Array(event.data);
-        const msg = tryDecode(dataU8);
-        if (msg != null) await this.handleMessage(msg);
-      });
-    });
+  private setStatus(s: ClientStatusValue) {
+    if (this.status === s) return;
+    this.status = s;
+    for (const cb of [...this.statusListeners]) {
+      try {
+        cb(s);
+      } catch {}
+    }
+  }
 
-    // Clear timers and pending waiters on close
-    this.ws.addEventListener('close', () => {
-      this.clearPingTimer();
-      this.ops.onWsClose?.();
-      this.rejectAllPingWaiters(new Error("WebSocket closed"));
-    });
+  /** Initiate or resume connection. Resolves when `Connected`. */
+  async connect(): Promise<void> {
+    // Ensure future unexpected closes will auto-reconnect again
+    this.shouldReconnect = true;
+    if (this.ws && this.ws.readyState === WebSocket.OPEN) return; // already connected
+    this.clearReconnectTimer();
+    this.setStatus(
+      this.reconnectAttempts > 0
+        ? ClientStatus.Reconnecting
+        : ClientStatus.Connecting
+    );
+
+    // Reset the connected promise for this attempt
+    this.connectedPromise = this.createConnectedPromise();
+
+    this.ws = new WebSocket(this.ops.url);
+    try {
+      this.ws.binaryType = "arraybuffer";
+    } catch {}
+
+    this.ws.addEventListener("open", this.handleOpen);
+    this.ws.addEventListener("error", this.handleError);
+    this.ws.addEventListener("close", this.handleClose);
+    this.ws.addEventListener("message", this.handleWsMessage);
+
+    return this.connectedPromise;
+  }
+
+  private handleWsMessage = async (
+    event: MessageEvent<string | ArrayBuffer>
+  ) => {
+    if (typeof event.data === "string") {
+      if (event.data === "ping") {
+        try {
+          this.ws.send("pong");
+        } catch {}
+        return;
+      }
+      if (event.data === "pong") {
+        this.handlePong();
+        return;
+      }
+      return; // ignore other texts
+    }
+    const dataU8 = new Uint8Array(event.data);
+    const msg = tryDecode(dataU8);
+    if (msg != null) await this.handleMessage(msg);
+  };
+
+  private handleOpen = () => {
+    this.clearReconnectTimer();
+    this.reconnectAttempts = 0;
+    this.setStatus(ClientStatus.Connected);
+    this.startPingTimer();
+    this.resolveConnected?.();
+    // Rejoin rooms after reconnect
+    this.rejoinActiveRooms();
+  };
+
+  private handleError = () => {
+    // Leave for now; close event will drive reconnection
+  };
+
+  private handleClose = () => {
+    this.clearPingTimer();
+    // Reset any in-flight RTT probe to allow future pings after reconnect
+    this.awaitingPongSince = undefined;
+    this.ops.onWsClose?.();
+    this.rejectAllPingWaiters(new Error("WebSocket closed"));
+    if (!this.shouldReconnect) {
+      this.setStatus(ClientStatus.Disconnected);
+      this.rejectConnected?.(new Error("Disconnected"));
+      return;
+    }
+    // Start (or continue) exponential backoff retries
+    this.setStatus(ClientStatus.Reconnecting);
+    this.scheduleReconnect();
+  };
+
+  private scheduleReconnect() {
+    if (this.reconnectTimer) return;
+    if (!this.isOnline) return; // pause while offline
+    const attempt = ++this.reconnectAttempts;
+    const base = 500; // ms
+    const max = 15_000; // ms
+    const delay = Math.min(max, base * 2 ** (attempt - 1));
+    this.reconnectTimer = setTimeout(() => {
+      this.reconnectTimer = undefined;
+      void this.connect();
+    }, delay);
+  }
+
+  private clearReconnectTimer() {
+    if (this.reconnectTimer) clearTimeout(this.reconnectTimer);
+    this.reconnectTimer = undefined;
+  }
+
+  private handleOnline = () => {
+    this.isOnline = true;
+    if (
+      this.shouldReconnect &&
+      (this.status === ClientStatus.Reconnecting ||
+        this.status === ClientStatus.Connecting)
+    ) {
+      this.clearReconnectTimer();
+      // Try immediately when back online
+      void this.connect();
+    }
+  };
+
+  private handleOffline = () => {
+    this.isOnline = false;
+    // Pause scheduled retries until online
+    this.clearReconnectTimer();
+    if (this.shouldReconnect) {
+      this.setStatus(ClientStatus.Reconnecting);
+    }
+  };
+
+  // Re-send JoinRequest for all active rooms after reconnect
+  private rejoinActiveRooms() {
+    for (const [id, adaptor] of this.roomAdaptors) {
+      const roomId = this.roomIds.get(id);
+      if (!roomId) continue;
+      // Prepare a lightweight pending entry so JoinError handling can retry version formats
+      const roomPromise = Promise.resolve(this.activeRooms.get(id)?.room!);
+      const pending: PendingRoom = {
+        room: roomPromise,
+        resolve: (res: JoinResponseOk) => {
+          // On successful rejoin, let adaptor reconcile to server
+          adaptor.handleJoinOk(res).catch(e => console.error(e));
+          // Clean up pending entry for this id
+          this.pendingRooms.delete(id);
+        },
+        reject: (error: Error) => {
+          console.error("Rejoin failed:", error);
+        },
+        adaptor,
+        roomId,
+        auth: this.roomAuth.get(id),
+      };
+      this.pendingRooms.set(id, pending);
+
+      try {
+        this.ws.send(
+          encode({
+            type: MessageType.JoinRequest,
+            crdt: adaptor.crdtType,
+            roomId,
+            auth: pending.auth ?? new Uint8Array(),
+            version: adaptor.getVersion(),
+          } as JoinRequest)
+        );
+      } catch (e) {
+        console.error("Failed to send rejoin request:", e);
+      }
+    }
   }
 
   private async handleMessage(msg: ProtocolMessage) {
@@ -270,6 +513,7 @@ export class LoroWebsocketClient {
     const id = crdtType + roomId;
     this.activeRooms.set(id, { room, handler });
     this.roomAdaptors.set(id, adaptor);
+    this.roomIds.set(id, roomId);
 
     // Flush buffered %ELO updates if any
     const buf = this.preJoinUpdates.get(id);
@@ -334,6 +578,8 @@ export class LoroWebsocketClient {
     this.activeRooms.delete(id);
     this.pendingRooms.delete(id);
     this.roomAdaptors.delete(id);
+    this.roomIds.delete(id);
+    this.roomAuth.delete(id);
   }
 
   waitConnected() {
@@ -369,6 +615,7 @@ export class LoroWebsocketClient {
       };
       this.pingWaiters.push(waiter);
       try {
+        if (this.awaitingPongSince == null) this.awaitingPongSince = Date.now();
         this.ws.send("ping");
       } catch (e) {
         this.pingWaiters.pop();
@@ -445,7 +692,6 @@ export class LoroWebsocketClient {
       // Create room and register before invoking adaptor.handleJoinOk to ensure
       // any immediate backfills from the server are routed to the adaptor.
       const { room, handler } = createLoroWebsocketClientRoom({
-        ws: this.ws,
         client: this,
         roomId,
         crdtType: crdtAdaptor.crdtType,
@@ -472,6 +718,7 @@ export class LoroWebsocketClient {
       roomId,
       auth,
     });
+    this.roomAuth.set(id, auth);
 
     this.ws.send(
       encode({
@@ -486,8 +733,18 @@ export class LoroWebsocketClient {
     return room;
   }
 
+  /**
+   * Manually close the connection and stop auto-reconnect.
+   * To reconnect later, call `connect()`.
+   */
   close() {
-    // TODO: impl
+    this.shouldReconnect = false;
+    this.clearReconnectTimer();
+    this.clearPingTimer();
+    try {
+      this.ws?.close();
+    } catch {}
+    this.setStatus(ClientStatus.Disconnected);
   }
 
   // Fragment and send a single update if it exceeds safe payload size
@@ -547,6 +804,18 @@ export class LoroWebsocketClient {
     }
   }
 
+  /** @internal Send Leave on the current websocket. */
+  sendLeave(crdt: CrdtType, roomId: string) {
+    if (!this.ws || this.ws.readyState !== WebSocket.OPEN) return;
+    this.ws.send(
+      encode({
+        type: MessageType.Leave,
+        crdt,
+        roomId,
+      } as Leave)
+    );
+  }
+
   private startPingTimer(): void {
     const interval = getPingIntervalMs(this.ops);
     if (!interval) return;
@@ -554,9 +823,15 @@ export class LoroWebsocketClient {
     this.pingTimer = setInterval(() => {
       try {
         if (this.ws && this.ws.readyState === WebSocket.OPEN) {
-          this.ws.send("ping");
+          // Avoid overlapping RTT probes
+          if (this.awaitingPongSince == null) {
+            this.awaitingPongSince = Date.now();
+            this.ws.send("ping");
+          } else {
+            // Still awaiting a pong; skip sending another ping
+          }
         }
-      } catch { }
+      } catch {}
     }, interval);
   }
 
@@ -566,10 +841,24 @@ export class LoroWebsocketClient {
   }
 
   private handlePong(): void {
-    if (this.pingWaiters.length === 0) return;
+    // RTT measurement
+    if (this.awaitingPongSince != null) {
+      const rtt = Date.now() - this.awaitingPongSince;
+      if (rtt >= 0 && isFinite(rtt)) {
+        this.lastLatencyMs = rtt;
+        for (const cb of [...this.latencyListeners]) {
+          try {
+            cb(rtt);
+          } catch {}
+        }
+      }
+      this.awaitingPongSince = undefined;
+    }
     // Resolve all waiters on any pong
-    const waiters = this.pingWaiters.splice(0, this.pingWaiters.length);
-    for (const w of waiters) w.resolve();
+    if (this.pingWaiters.length > 0) {
+      const waiters = this.pingWaiters.splice(0, this.pingWaiters.length);
+      for (const w of waiters) w.resolve();
+    }
   }
 
   private rejectAllPingWaiters(err: Error): void {
@@ -577,7 +866,7 @@ export class LoroWebsocketClient {
       const w = this.pingWaiters.shift()!;
       try {
         w.reject(err);
-      } catch { }
+      } catch {}
     }
   }
 }
@@ -595,8 +884,8 @@ export interface LoroWebsocketClientRoom {
 }
 
 class LoroWebsocketClientRoomImpl
-  implements LoroWebsocketClientRoom, InternalRoomHandler {
-  private ws: WebSocket | undefined;
+  implements LoroWebsocketClientRoom, InternalRoomHandler
+{
   private client: LoroWebsocketClient;
   private roomId: string;
   private crdtType: CrdtType;
@@ -605,25 +894,18 @@ class LoroWebsocketClientRoomImpl
   private unsubscribe: (() => void)[] = [];
 
   constructor(opts: {
-    ws: WebSocket;
     client: LoroWebsocketClient;
     roomId: string;
     crdtType: CrdtType;
     crdtAdaptor: CrdtDocAdaptor;
   }) {
-    this.ws = opts.ws;
     this.client = opts.client;
     this.roomId = opts.roomId;
     this.crdtType = opts.crdtType;
     this.crdtAdaptor = opts.crdtAdaptor;
 
-    const onDestroy = () => {
-      void this.destroy();
-    };
-    this.ws.addEventListener("close", onDestroy);
-    this.unsubscribe.push(() => {
-      this.ws?.removeEventListener("close", onDestroy);
-    });
+    // Room lifetime is controlled explicitly by leave()/destroy().
+    // Do not auto-destroy on underlying ws close; client handles reconnects.
   }
 
   /**
@@ -642,18 +924,13 @@ class LoroWebsocketClientRoomImpl
   }
 
   async leave() {
-    if (this.destroyed || !this.ws) {
+    if (this.destroyed) {
       return;
     }
 
     // Send Leave message
-    this.ws.send(
-      encode({
-        type: MessageType.Leave,
-        crdt: this.crdtType,
-        roomId: this.roomId,
-      } as Leave)
-    );
+    // Use client's current websocket to ensure it works across reconnects
+    this.client.sendLeave(this.crdtType, this.roomId);
   }
 
   async destroy() {
@@ -671,8 +948,6 @@ class LoroWebsocketClientRoomImpl
 
     // Unregister from client
     this.client.cleanupRoom(this.roomId, this.crdtType);
-
-    this.ws = undefined;
   }
 }
 
@@ -695,7 +970,6 @@ function getPingIntervalMs(opts: {
 }
 
 function createLoroWebsocketClientRoom(opts: {
-  ws: WebSocket;
   client: LoroWebsocketClient;
   roomId: string;
   crdtType: CrdtType;
