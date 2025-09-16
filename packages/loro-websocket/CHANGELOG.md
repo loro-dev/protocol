@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.2](https://github.com/loro-dev/protocol/compare/loro-websocket-v0.1.1...loro-websocket-v0.1.2) (2025-09-16)
+
+
+### Bug Fixes
+
+* use right status and auto retry after come back online ([fd1a67c](https://github.com/loro-dev/protocol/commit/fd1a67cd14e704110ee9faf090e372f753e68ab8))
+
 ## 0.1.0 (2025-09-12)
 
 
