@@ -256,10 +256,20 @@ export class LoroWebsocketClient {
 
   private handleClose = () => {
     this.clearPingTimer();
+    // Clear any pending fragment reassembly timers to avoid late callbacks
+    if (this.fragmentBatches.size) {
+      for (const [, batch] of this.fragmentBatches) {
+        try {
+          clearTimeout(batch.timeoutId);
+        } catch {}
+      }
+      this.fragmentBatches.clear();
+    }
     // Reset any in-flight RTT probe to allow future pings after reconnect
     this.awaitingPongSince = undefined;
     this.ops.onWsClose?.();
     this.rejectAllPingWaiters(new Error("WebSocket closed"));
+    this.detachSocketListeners(this.ws);
     if (!this.shouldReconnect) {
       this.setStatus(ClientStatus.Disconnected);
       this.rejectConnected?.(new Error("Disconnected"));
@@ -432,15 +442,19 @@ export class LoroWebsocketClient {
     const timeoutId = setTimeout(() => {
       this.fragmentBatches.delete(batchKey);
       // Send timeout error
-      this.ws.send(
-        encode({
-          type: MessageType.UpdateError,
-          crdt: msg.crdt,
-          roomId: msg.roomId,
-          code: UpdateErrorCode.FragmentTimeout,
-          message: `Fragment reassembly timeout for batch ${msg.batchId}`,
-        } as UpdateError)
-      );
+      try {
+        if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+          this.ws.send(
+            encode({
+              type: MessageType.UpdateError,
+              crdt: msg.crdt,
+              roomId: msg.roomId,
+              code: UpdateErrorCode.FragmentTimeout,
+              message: `Fragment reassembly timeout for batch ${msg.batchId}`,
+            } as UpdateError)
+          );
+        }
+      } catch {}
     }, 10000);
 
     this.fragmentBatches.set(batchKey, {
@@ -741,9 +755,13 @@ export class LoroWebsocketClient {
     this.shouldReconnect = false;
     this.clearReconnectTimer();
     this.clearPingTimer();
-    try {
-      this.ws?.close();
-    } catch {}
+    this.rejectConnected?.(new Error("Disconnected"));
+    this.rejectConnected = undefined;
+    this.resolveConnected = undefined;
+    this.flushAndCloseWebSocket(this.ws, {
+      code: 1000,
+      reason: "Client closed",
+    });
     this.setStatus(ClientStatus.Disconnected);
   }
 
@@ -816,6 +834,95 @@ export class LoroWebsocketClient {
     );
   }
 
+  /**
+   * Destroy the client, removing listeners and stopping timers.
+   * After destroy, the instance should not be used.
+   */
+  destroy(): void {
+    this.shouldReconnect = false;
+    this.clearReconnectTimer();
+    this.clearPingTimer();
+    this.rejectConnected?.(new Error("Destroyed"));
+    this.rejectConnected = undefined;
+    this.resolveConnected = undefined;
+    this.rejectAllPingWaiters(new Error("Destroyed"));
+    // Remove window event listeners if present
+    try {
+      if (
+        typeof window !== "undefined" &&
+        typeof window.removeEventListener === "function"
+      ) {
+        window.removeEventListener("online", this.handleOnline);
+        window.removeEventListener("offline", this.handleOffline);
+      }
+    } catch {}
+    // Close websocket after flushing pending frames
+    try {
+      this.flushAndCloseWebSocket(this.ws, {
+        code: 1000,
+        reason: "Client destroyed",
+      });
+    } catch {}
+    this.setStatus(ClientStatus.Disconnected);
+  }
+
+  private flushAndCloseWebSocket(
+    ws: WebSocket | undefined,
+    opts?: { code?: number; reason?: string; timeoutMs?: number }
+  ): void {
+    if (!ws) return;
+    const { code, reason, timeoutMs = 2000 } = opts ?? {};
+
+    const readBufferedAmount = (): number | undefined => {
+      const raw = Reflect.get(ws, "bufferedAmount") as unknown;
+      return typeof raw === "number" ? raw : undefined;
+    };
+
+    if (readBufferedAmount() == null) {
+      try {
+        ws.close(code, reason);
+      } catch {}
+      return;
+    }
+
+    const start = Date.now();
+    let requested = false;
+    const attemptClose = () => {
+      if (requested) return;
+      const state = ws.readyState;
+      if (state === WebSocket.CLOSED || state === WebSocket.CLOSING) {
+        requested = true;
+        try {
+          ws.close(code, reason);
+        } catch {}
+        return;
+      }
+
+      const buffered = readBufferedAmount();
+      if (buffered == null || buffered <= 0 || Date.now() - start >= timeoutMs) {
+        requested = true;
+        try {
+          ws.close(code, reason);
+        } catch {}
+        return;
+      }
+
+      setTimeout(attemptClose, 25);
+    };
+
+    attemptClose();
+  }
+
+  private detachSocketListeners(ws: WebSocket | undefined): void {
+    if (!ws) return;
+    try {
+      ws.removeEventListener?.("open", this.handleOpen);
+      ws.removeEventListener?.("error", this.handleError);
+      ws.removeEventListener?.("close", this.handleClose);
+      ws.removeEventListener?.("message", this.handleWsMessage);
+    } catch {}
+  }
+
   private startPingTimer(): void {
     const interval = getPingIntervalMs(this.ops);
     if (!interval) return;
@@ -865,6 +972,7 @@ export class LoroWebsocketClient {
     while (this.pingWaiters.length) {
       const w = this.pingWaiters.shift()!;
       try {
+        clearTimeout(w.timeoutId);
         w.reject(err);
       } catch {}
     }
