@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.0](https://github.com/loro-dev/protocol/compare/loro-websocket-v0.1.0...loro-websocket-v0.1.0) (2025-09-16)
+
+
+### Features
+
+* better ws client ([#4](https://github.com/loro-dev/protocol/issues/4)) ([f591ce3](https://github.com/loro-dev/protocol/commit/f591ce3beaea2a6998e3f51de1a16101c30d18a7))
+
 ## 0.1.0 (2025-09-12)
 
 
