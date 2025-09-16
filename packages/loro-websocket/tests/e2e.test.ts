@@ -156,9 +156,9 @@ describe("E2E: Client-Server Sync", () => {
     // Simulate unexpected disconnect by stopping server
     await server.stop();
 
-    // Wait until client reports Reconnecting
+    // Wait until client reports Disconnected
     await waitUntil(
-      () => seen.includes(ClientStatus.Reconnecting),
+      () => seen.includes(ClientStatus.Disconnected),
       5000,
       25
     );
@@ -292,6 +292,76 @@ describe("E2E: Client-Server Sync", () => {
     client2.destroy();
   }, 20000);
 
+  it("resumes syncing after simulated offline/online events", async () => {
+    const env = installMockWindow();
+    let client1: LoroWebsocketClient | undefined;
+    let client2: LoroWebsocketClient | undefined;
+    let unsubscribe1: (() => void) | undefined;
+    let unsubscribe2: (() => void) | undefined;
+    try {
+      client1 = new LoroWebsocketClient({ url: `ws://localhost:${port}` });
+      client2 = new LoroWebsocketClient({ url: `ws://localhost:${port}` });
+
+      const statuses1: string[] = [];
+      const statuses2: string[] = [];
+      unsubscribe1 = client1.onStatusChange(s => statuses1.push(s));
+      unsubscribe2 = client2.onStatusChange(s => statuses2.push(s));
+
+      await Promise.all([client1.waitConnected(), client2.waitConnected()]);
+
+      const adaptor1 = createLoroAdaptor({ peerId: 31 });
+      const adaptor2 = createLoroAdaptor({ peerId: 32 });
+
+      const [room1, room2] = await Promise.all([
+        client1.join({ roomId: "offline-room", crdtAdaptor: adaptor1 }),
+        client2.join({ roomId: "offline-room", crdtAdaptor: adaptor2 }),
+      ]);
+
+      const text1 = adaptor1.getDoc().getText("shared");
+      const text2 = adaptor2.getDoc().getText("shared");
+
+      text1.insert(0, "seed");
+      adaptor1.getDoc().commit();
+      await waitUntil(() => text2.toString() === "seed", 3000, 50);
+
+      env.goOffline();
+      await waitUntil(
+        () =>
+          client1!.getStatus() === ClientStatus.Disconnected &&
+          client2!.getStatus() === ClientStatus.Disconnected,
+        5000,
+        25
+      );
+      expect(statuses1.includes(ClientStatus.Disconnected)).toBe(true);
+      expect(statuses2.includes(ClientStatus.Disconnected)).toBe(true);
+
+      text1.insert(text1.length, " offline edit");
+      adaptor1.getDoc().commit();
+      const expected = text1.toString();
+
+      await new Promise(resolve => setTimeout(resolve, 50));
+
+      env.goOnline();
+      await waitUntil(
+        () =>
+          client1!.getStatus() === ClientStatus.Connected &&
+          client2!.getStatus() === ClientStatus.Connected,
+        10000,
+        50
+      );
+
+      await waitUntil(() => text2.toString() === expected, 5000, 50);
+
+      await Promise.all([room1.destroy(), room2.destroy()]);
+    } finally {
+      unsubscribe1?.();
+      unsubscribe2?.();
+      client1?.destroy();
+      client2?.destroy();
+      env.restore();
+    }
+  }, 20000);
+
   it("destroy rejects pending ping waiters", async () => {
     const client = new LoroWebsocketClient({ url: `ws://localhost:${port}` });
     await client.waitConnected();
@@ -341,6 +411,103 @@ describe("E2E: Client-Server Sync", () => {
     client.destroy();
   }, 15000);
 });
+
+function installMockWindow(initialOnline = true) {
+  const originalWindowDescriptor = Object.getOwnPropertyDescriptor(
+    globalThis,
+    "window"
+  );
+  const originalNavigatorDescriptor = Object.getOwnPropertyDescriptor(
+    globalThis,
+    "navigator"
+  );
+
+  const listeners = new Map<string, Set<EventListenerOrEventListenerObject>>();
+  const state = { online: initialOnline };
+
+  const mockWindow = {
+    addEventListener(type: string, listener: EventListenerOrEventListenerObject) {
+      if (!listener) return;
+      let set = listeners.get(type);
+      if (!set) {
+        set = new Set();
+        listeners.set(type, set);
+      }
+      set.add(listener);
+    },
+    removeEventListener(type: string, listener: EventListenerOrEventListenerObject) {
+      const set = listeners.get(type);
+      if (!set) return;
+      set.delete(listener);
+      if (set.size === 0) {
+        listeners.delete(type);
+      }
+    },
+  } as Pick<Window, "addEventListener" | "removeEventListener">;
+
+  const mockNavigator = {
+    get onLine() {
+      return state.online;
+    },
+    set onLine(value: boolean) {
+      state.online = value;
+    },
+  } as Navigator & { onLine: boolean };
+
+  Object.defineProperty(globalThis, "window", {
+    configurable: true,
+    writable: true,
+    value: mockWindow,
+  });
+  Object.defineProperty(globalThis, "navigator", {
+    configurable: true,
+    writable: true,
+    value: mockNavigator,
+  });
+
+  const dispatch = (type: "online" | "offline") => {
+    state.online = type === "online";
+    const set = listeners.get(type);
+    if (!set) return;
+    const evt = { type } as Event;
+    for (const listener of Array.from(set)) {
+      if (typeof listener === "function") {
+        listener.call(mockWindow, evt);
+      } else if (
+        listener &&
+        typeof (listener as EventListenerObject).handleEvent === "function"
+      ) {
+        (listener as EventListenerObject).handleEvent.call(mockWindow, evt);
+      }
+    }
+  };
+
+  return {
+    goOnline() {
+      dispatch("online");
+    },
+    goOffline() {
+      dispatch("offline");
+    },
+    restore() {
+      if (originalWindowDescriptor) {
+        Object.defineProperty(globalThis, "window", originalWindowDescriptor);
+      } else {
+        delete (globalThis as any).window;
+      }
+      if (originalNavigatorDescriptor) {
+        Object.defineProperty(
+          globalThis,
+          "navigator",
+          originalNavigatorDescriptor
+        );
+      } else {
+        delete (globalThis as any).navigator;
+      }
+      listeners.clear();
+    },
+  };
+}
 
 // Small polling helper for this file
 async function waitUntil(

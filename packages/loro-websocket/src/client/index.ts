@@ -53,17 +53,38 @@ interface SocketListeners {
   message: (event: MessageEvent<string | ArrayBuffer>) => void;
 }
 
+type NodeProcessLike = {
+  on?: (event: string, listener: () => void) => unknown;
+  off?: (event: string, listener: () => void) => unknown;
+  removeListener?: (event: string, listener: () => void) => unknown;
+};
+
+const readInitialOnlineState = (): boolean => {
+  try {
+    if (typeof navigator !== "undefined") {
+      const navOnline = (navigator as { onLine?: unknown }).onLine;
+      if (typeof navOnline === "boolean") {
+        return navOnline;
+      }
+    }
+  } catch {}
+
+  const globalScope = globalThis as {
+    navigator?: { onLine?: unknown };
+  };
+  const maybe = globalScope.navigator?.onLine;
+  return typeof maybe === "boolean" ? maybe : true;
+};
+
 /**
  * The websocket client's high-level connection status.
  * - `Connecting`: initial connect or a manual `connect()` in progress.
  * - `Connected`: the websocket is open and usable.
- * - `Reconnecting`: the connection dropped unexpectedly; the client is retrying with exponential backoff.
- * - `Disconnected`: the client is not connected and won't auto-reconnect (call `connect()` to resume).
+ * - `Disconnected`: the client is not connected. Call `connect()` to retry.
  */
 export const ClientStatus = {
   Connecting: "connecting",
   Connected: "connected",
-  Reconnecting: "reconnecting",
   Disconnected: "disconnected",
 } as const;
 export type ClientStatusValue =
@@ -93,8 +114,7 @@ export interface LoroWebsocketClientOptions {
  *
  * Status model:
  * - `Connected`: ws open.
- * - `Reconnecting`: closed unexpectedly; client retries with exponential backoff. Pauses while offline; resumes on `online`.
- * - `Disconnected`: closed via `close()`; client will not reconnect until `connect()` is called again.
+ * - `Disconnected`: socket closed. Auto-reconnect retries run unless `close()`/`destroy()` stop them.
  * - `Connecting`: initial or manual connect in progress.
  *
  * Events:
@@ -134,28 +154,91 @@ export class LoroWebsocketClient {
   private shouldReconnect = true;
   private reconnectAttempts = 0;
   private reconnectTimer?: ReturnType<typeof setTimeout>;
-  private isOnline = true;
+  private isOnline = readInitialOnlineState();
+  private removeNetworkListeners?: () => void;
 
   constructor(private ops: LoroWebsocketClientOptions) {
-    // Wire browser network events if available
+    this.attachNetworkListeners();
+
+    // Start initial connection
+    this.ensureConnectedPromise();
+    void this.connect();
+  }
+
+  private ensureConnectedPromise(): void {
+    if (this.resolveConnected) return;
+    this.connectedPromise = new Promise<void>((resolve, reject) => {
+      this.resolveConnected = () => {
+        this.resolveConnected = undefined;
+        this.rejectConnected = undefined;
+        resolve();
+      };
+      this.rejectConnected = (err: Error) => {
+        this.resolveConnected = undefined;
+        this.rejectConnected = undefined;
+        reject(err);
+      };
+    });
+  }
+
+  private attachNetworkListeners(): void {
+    this.removeNetworkListeners?.();
+    this.removeNetworkListeners = undefined;
+
     if (
       typeof window !== "undefined" &&
       typeof window.addEventListener === "function"
     ) {
       window.addEventListener("online", this.handleOnline);
       window.addEventListener("offline", this.handleOffline);
+      this.removeNetworkListeners = () => {
+        window.removeEventListener("online", this.handleOnline);
+        window.removeEventListener("offline", this.handleOffline);
+      };
+      return;
     }
 
-    // Start initial connection
-    this.connectedPromise = this.createConnectedPromise();
-    void this.connect();
-  }
+    const globalScope = globalThis as typeof globalThis & {
+      addEventListener?: (
+        type: string,
+        listener: EventListenerOrEventListenerObject
+      ) => void;
+      removeEventListener?: (
+        type: string,
+        listener: EventListenerOrEventListenerObject
+      ) => void;
+      process?: NodeProcessLike;
+    };
 
-  private createConnectedPromise() {
-    return new Promise<void>((resolve, reject) => {
-      this.resolveConnected = resolve;
-      this.rejectConnected = reject;
-    });
+    if (typeof globalScope.addEventListener === "function") {
+      const online = this.handleOnline as EventListener;
+      const offline = this.handleOffline as EventListener;
+      globalScope.addEventListener("online", online);
+      globalScope.addEventListener("offline", offline);
+      this.removeNetworkListeners = () => {
+        globalScope.removeEventListener?.("online", online);
+        globalScope.removeEventListener?.("offline", offline);
+      };
+      return;
+    }
+
+    const maybeProcess = globalScope.process;
+    if (maybeProcess && typeof maybeProcess.on === "function") {
+      // Node environments may surface online/offline via the global process emitter.
+      const online = () => this.handleOnline();
+      const offline = () => this.handleOffline();
+      maybeProcess.on("online", online);
+      maybeProcess.on("offline", offline);
+      this.removeNetworkListeners = () => {
+        if (typeof maybeProcess.off === "function") {
+          maybeProcess.off("online", online);
+          maybeProcess.off("offline", offline);
+        } else if (typeof maybeProcess.removeListener === "function") {
+          maybeProcess.removeListener("online", online);
+          maybeProcess.removeListener("offline", offline);
+        }
+      };
+    }
   }
 
   /** Current client status. */
@@ -212,14 +295,15 @@ export class LoroWebsocketClient {
       }
     }
     this.clearReconnectTimer();
-    this.setStatus(
-      this.reconnectAttempts > 0
-        ? ClientStatus.Reconnecting
-        : ClientStatus.Connecting
-    );
+    // Ensure there's a pending promise for this attempt
+    this.ensureConnectedPromise();
 
-    // Reset the connected promise for this attempt
-    this.connectedPromise = this.createConnectedPromise();
+    if (!this.isOnline) {
+      this.setStatus(ClientStatus.Disconnected);
+      return this.connectedPromise;
+    }
+
+    this.setStatus(ClientStatus.Connecting);
 
     const ws = new WebSocket(this.ops.url);
     this.ws = ws;
@@ -316,7 +400,7 @@ export class LoroWebsocketClient {
       return;
     }
     // Start (or continue) exponential backoff retries
-    this.setStatus(ClientStatus.Reconnecting);
+    this.setStatus(ClientStatus.Disconnected);
     this.scheduleReconnect();
   }
 
@@ -345,13 +429,13 @@ export class LoroWebsocketClient {
     if (msg != null) await this.handleMessage(msg);
   }
 
-  private scheduleReconnect() {
+  private scheduleReconnect(immediate = false) {
     if (this.reconnectTimer) return;
     if (!this.isOnline) return; // pause while offline
     const attempt = ++this.reconnectAttempts;
     const base = 500; // ms
     const max = 15_000; // ms
-    const delay = Math.min(max, base * 2 ** (attempt - 1));
+    const delay = immediate ? 0 : Math.min(max, base * 2 ** (attempt - 1));
     this.reconnectTimer = setTimeout(() => {
       this.reconnectTimer = undefined;
       void this.connect();
@@ -365,15 +449,10 @@ export class LoroWebsocketClient {
 
   private handleOnline = () => {
     this.isOnline = true;
-    if (
-      this.shouldReconnect &&
-      (this.status === ClientStatus.Reconnecting ||
-        this.status === ClientStatus.Connecting)
-    ) {
-      this.clearReconnectTimer();
-      // Try immediately when back online
-      void this.connect();
-    }
+    if (!this.shouldReconnect) return;
+    if (this.status === ClientStatus.Connected) return;
+    this.clearReconnectTimer();
+    this.scheduleReconnect(true);
   };
 
   private handleOffline = () => {
@@ -381,7 +460,10 @@ export class LoroWebsocketClient {
     // Pause scheduled retries until online
     this.clearReconnectTimer();
     if (this.shouldReconnect) {
-      this.setStatus(ClientStatus.Reconnecting);
+      this.setStatus(ClientStatus.Disconnected);
+      try {
+        this.ws?.close(1001, "Offline");
+      } catch {}
     }
   };
 
@@ -824,6 +906,7 @@ export class LoroWebsocketClient {
     this.shouldReconnect = false;
     this.clearReconnectTimer();
     this.clearPingTimer();
+    this.reconnectAttempts = 0;
     this.rejectConnected?.(new Error("Disconnected"));
     this.rejectConnected = undefined;
     this.resolveConnected = undefined;
@@ -855,6 +938,10 @@ export class LoroWebsocketClient {
     roomId: string,
     update: Uint8Array
   ): void {
+    const ws = this.ws;
+    if (!ws || ws.readyState !== WebSocket.OPEN) {
+      return;
+    }
     // Leave headroom for protocol overhead to stay under MAX_MESSAGE_SIZE
     const FRAG_LIMIT = Math.max(
       1,
@@ -863,7 +950,7 @@ export class LoroWebsocketClient {
 
     if (update.length <= FRAG_LIMIT) {
       // Send as a single DocUpdate with one update entry
-      this.ws.send(
+      ws.send(
         encode({
           type: MessageType.DocUpdate,
           crdt,
@@ -888,7 +975,7 @@ export class LoroWebsocketClient {
       fragmentCount,
       totalSizeBytes: update.length,
     };
-    this.ws.send(encode(header));
+    ws.send(encode(header));
 
     for (let i = 0; i < fragmentCount; i++) {
       const start = i * FRAG_LIMIT;
@@ -902,7 +989,7 @@ export class LoroWebsocketClient {
         index: i,
         fragment,
       };
-      this.ws.send(encode(msg));
+      ws.send(encode(msg));
     }
   }
 
@@ -926,6 +1013,7 @@ export class LoroWebsocketClient {
     this.shouldReconnect = false;
     this.clearReconnectTimer();
     this.clearPingTimer();
+    this.reconnectAttempts = 0;
     this.rejectConnected?.(new Error("Destroyed"));
     this.rejectConnected = undefined;
     this.resolveConnected = undefined;
@@ -944,16 +1032,10 @@ export class LoroWebsocketClient {
       this.ops.onWsClose?.();
     }
     this.detachSocketListeners(ws);
-    // Remove window event listeners if present
     try {
-      if (
-        typeof window !== "undefined" &&
-        typeof window.removeEventListener === "function"
-      ) {
-        window.removeEventListener("online", this.handleOnline);
-        window.removeEventListener("offline", this.handleOffline);
-      }
+      this.removeNetworkListeners?.();
     } catch {}
+    this.removeNetworkListeners = undefined;
     // Close websocket after flushing pending frames
     try {
       this.flushAndCloseWebSocket(ws, {
@@ -997,7 +1079,11 @@ export class LoroWebsocketClient {
       }
 
       const buffered = readBufferedAmount();
-      if (buffered == null || buffered <= 0 || Date.now() - start >= timeoutMs) {
+      if (
+        buffered == null ||
+        buffered <= 0 ||
+        Date.now() - start >= timeoutMs
+      ) {
         requested = true;
         try {
           ws.close(code, reason);

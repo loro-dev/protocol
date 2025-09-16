@@ -77,7 +77,6 @@ interface LoroWebsocketClientOptions {
 const ClientStatus = {
   Connecting: "connecting",
   Connected: "connected",
-  Reconnecting: "reconnecting",
   Disconnected: "disconnected",
 } as const;
 type ClientStatusValue = typeof ClientStatus[keyof typeof ClientStatus];
@@ -107,13 +106,12 @@ type ClientStatusValue = typeof ClientStatus[keyof typeof ClientStatus];
 - Status values
   - `Connecting`: initial or manual `connect()` in progress.
   - `Connected`: websocket is open and usable.
-  - `Reconnecting`: unexpected close; client retries with exponential backoff.
-  - `Disconnected`: manual `close()`; client will not auto‑reconnect until `connect()` is called.
+  - `Disconnected`: socket closed. Auto‑reconnect keeps retrying unless `close()`/`destroy()` stop it.
 
 - Auto‑reconnect
-  - Exponential backoff: starts at ~500ms, doubles each attempt, capped at 15s.
-  - Pauses while browser is offline; resumes immediately on `online` event.
-  - After a manual `close()`, call `connect()` to resume retries.
+  - Retry cadence: attempts start ~500 ms after the first unexpected close and double on each failure (1 s, 2 s, 4 s, …) up to a 15 s ceiling. A successful connection resets the backoff to the 500 ms starting point.
+  - The timer is canceled when the environment reports `offline`; the client stays in `Disconnected` until an `online` event arrives, at which point the next retry fires immediately.
+  - Calling `close()` or `destroy()` turns off auto‑retry. Invoke `connect()` later to restart the process with a fresh backoff window.
 
 ## Latency & Ping/Pong
 
