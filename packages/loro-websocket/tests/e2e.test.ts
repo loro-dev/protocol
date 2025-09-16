@@ -324,6 +324,22 @@ describe("E2E: Client-Server Sync", () => {
 
     clientWithPong.handlePong = originalHandlePong;
   }, 10000);
+
+  it("allows immediate reconnect after close without hanging", async () => {
+    const client = new LoroWebsocketClient({ url: `ws://localhost:${port}` });
+    await client.waitConnected();
+
+    client.close();
+    const reconnect = client.connect();
+
+    // Let the previous socket dispatch its close event before awaiting connect
+    await new Promise(resolve => setTimeout(resolve, 10));
+
+    await reconnect;
+    await waitUntil(() => client.getStatus() === ClientStatus.Connected, 5000);
+
+    client.destroy();
+  }, 15000);
 });
 
 // Small polling helper for this file

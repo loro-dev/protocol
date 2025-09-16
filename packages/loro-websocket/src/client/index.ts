@@ -46,6 +46,13 @@ interface ActiveRoom {
   handler: InternalRoomHandler;
 }
 
+interface SocketListeners {
+  open: () => void;
+  error: (event: Event) => void;
+  close: () => void;
+  message: (event: MessageEvent<string | ArrayBuffer>) => void;
+}
+
 /**
  * The websocket client's high-level connection status.
  * - `Connecting`: initial connect or a manual `connect()` in progress.
@@ -114,6 +121,7 @@ export class LoroWebsocketClient {
   // Track roomId for each active id so we can rejoin on reconnect
   private roomIds: Map<string, string> = new Map();
   private roomAuth: Map<string, Uint8Array | undefined> = new Map();
+  private socketListeners = new WeakMap<WebSocket, SocketListeners>();
 
   private pingTimer?: ReturnType<typeof setInterval>;
   private pingWaiters: Array<{
@@ -195,7 +203,13 @@ export class LoroWebsocketClient {
   async connect(): Promise<void> {
     // Ensure future unexpected closes will auto-reconnect again
     this.shouldReconnect = true;
-    if (this.ws && this.ws.readyState === WebSocket.OPEN) return; // already connected
+    const current = this.ws;
+    if (current) {
+      const state = current.readyState;
+      if (state === WebSocket.OPEN || state === WebSocket.CONNECTING) {
+        return this.connectedPromise;
+      }
+    }
     this.clearReconnectTimer();
     this.setStatus(
       this.reconnectAttempts > 0
@@ -206,41 +220,52 @@ export class LoroWebsocketClient {
     // Reset the connected promise for this attempt
     this.connectedPromise = this.createConnectedPromise();
 
-    this.ws = new WebSocket(this.ops.url);
-    try {
-      this.ws.binaryType = "arraybuffer";
-    } catch {}
+    const ws = new WebSocket(this.ops.url);
+    this.ws = ws;
 
-    this.ws.addEventListener("open", this.handleOpen);
-    this.ws.addEventListener("error", this.handleError);
-    this.ws.addEventListener("close", this.handleClose);
-    this.ws.addEventListener("message", this.handleWsMessage);
+    if (current && current !== ws) {
+      this.detachSocketListeners(current);
+    }
+
+    this.attachSocketListeners(ws);
+
+    try {
+      ws.binaryType = "arraybuffer";
+    } catch {}
 
     return this.connectedPromise;
   }
 
-  private handleWsMessage = async (
-    event: MessageEvent<string | ArrayBuffer>
-  ) => {
-    if (typeof event.data === "string") {
-      if (event.data === "ping") {
-        try {
-          this.ws.send("pong");
-        } catch {}
-        return;
-      }
-      if (event.data === "pong") {
-        this.handlePong();
-        return;
-      }
-      return; // ignore other texts
-    }
-    const dataU8 = new Uint8Array(event.data);
-    const msg = tryDecode(dataU8);
-    if (msg != null) await this.handleMessage(msg);
-  };
+  private attachSocketListeners(ws: WebSocket): void {
+    const open = () => this.onSocketOpen(ws);
+    const error = (event: Event) => this.onSocketError(ws, event);
+    const close = () => this.onSocketClose(ws);
+    const message = (event: MessageEvent<string | ArrayBuffer>) => {
+      void this.onSocketMessage(ws, event);
+    };
 
-  private handleOpen = () => {
+    ws.addEventListener("open", open);
+    ws.addEventListener("error", error);
+    ws.addEventListener("close", close);
+    ws.addEventListener("message", message);
+
+    this.socketListeners.set(ws, {
+      open,
+      error,
+      close,
+      message,
+    });
+  }
+
+  private onSocketOpen(ws: WebSocket): void {
+    if (ws !== this.ws) {
+      // TODO: REVIEW stale sockets bail early so they can't tear down the new connection
+      this.detachSocketListeners(ws);
+      try {
+        ws.close(1000, "Superseded");
+      } catch {}
+      return;
+    }
     this.clearReconnectTimer();
     this.reconnectAttempts = 0;
     this.setStatus(ClientStatus.Connected);
@@ -248,13 +273,22 @@ export class LoroWebsocketClient {
     this.resolveConnected?.();
     // Rejoin rooms after reconnect
     this.rejoinActiveRooms();
-  };
+  }
 
-  private handleError = () => {
-    // Leave for now; close event will drive reconnection
-  };
+  private onSocketError(ws: WebSocket, _event: Event): void {
+    if (ws !== this.ws) {
+      this.detachSocketListeners(ws);
+    }
+    // Leave further handling to the close event for the active socket
+  }
 
-  private handleClose = () => {
+  private onSocketClose(ws: WebSocket): void {
+    const isCurrent = ws === this.ws;
+    this.detachSocketListeners(ws);
+    if (!isCurrent) {
+      return;
+    }
+
     this.clearPingTimer();
     // Clear any pending fragment reassembly timers to avoid late callbacks
     if (this.fragmentBatches.size) {
@@ -269,7 +303,6 @@ export class LoroWebsocketClient {
     this.awaitingPongSince = undefined;
     this.ops.onWsClose?.();
     this.rejectAllPingWaiters(new Error("WebSocket closed"));
-    this.detachSocketListeners(this.ws);
     if (!this.shouldReconnect) {
       this.setStatus(ClientStatus.Disconnected);
       this.rejectConnected?.(new Error("Disconnected"));
@@ -278,7 +311,32 @@ export class LoroWebsocketClient {
     // Start (or continue) exponential backoff retries
     this.setStatus(ClientStatus.Reconnecting);
     this.scheduleReconnect();
-  };
+  }
+
+  private async onSocketMessage(
+    ws: WebSocket,
+    event: MessageEvent<string | ArrayBuffer>
+  ): Promise<void> {
+    if (ws !== this.ws) {
+      return;
+    }
+    if (typeof event.data === "string") {
+      if (event.data === "ping") {
+        try {
+          ws.send("pong");
+        } catch {}
+        return;
+      }
+      if (event.data === "pong") {
+        this.handlePong();
+        return;
+      }
+      return; // ignore other texts
+    }
+    const dataU8 = new Uint8Array(event.data);
+    const msg = tryDecode(dataU8);
+    if (msg != null) await this.handleMessage(msg);
+  }
 
   private scheduleReconnect() {
     if (this.reconnectTimer) return;
@@ -758,7 +816,22 @@ export class LoroWebsocketClient {
     this.rejectConnected?.(new Error("Disconnected"));
     this.rejectConnected = undefined;
     this.resolveConnected = undefined;
-    this.flushAndCloseWebSocket(this.ws, {
+    this.rejectAllPingWaiters(new Error("Disconnected"));
+    if (this.fragmentBatches.size) {
+      for (const [, batch] of this.fragmentBatches) {
+        try {
+          clearTimeout(batch.timeoutId);
+        } catch {}
+      }
+      this.fragmentBatches.clear();
+    }
+    this.awaitingPongSince = undefined;
+    const ws = this.ws;
+    if (ws && this.socketListeners.has(ws)) {
+      this.ops.onWsClose?.();
+    }
+    this.detachSocketListeners(ws);
+    this.flushAndCloseWebSocket(ws, {
       code: 1000,
       reason: "Client closed",
     });
@@ -846,6 +919,20 @@ export class LoroWebsocketClient {
     this.rejectConnected = undefined;
     this.resolveConnected = undefined;
     this.rejectAllPingWaiters(new Error("Destroyed"));
+    if (this.fragmentBatches.size) {
+      for (const [, batch] of this.fragmentBatches) {
+        try {
+          clearTimeout(batch.timeoutId);
+        } catch {}
+      }
+      this.fragmentBatches.clear();
+    }
+    this.awaitingPongSince = undefined;
+    const ws = this.ws;
+    if (ws && this.socketListeners.has(ws)) {
+      this.ops.onWsClose?.();
+    }
+    this.detachSocketListeners(ws);
     // Remove window event listeners if present
     try {
       if (
@@ -858,7 +945,7 @@ export class LoroWebsocketClient {
     } catch {}
     // Close websocket after flushing pending frames
     try {
-      this.flushAndCloseWebSocket(this.ws, {
+      this.flushAndCloseWebSocket(ws, {
         code: 1000,
         reason: "Client destroyed",
       });
@@ -915,12 +1002,15 @@ export class LoroWebsocketClient {
 
   private detachSocketListeners(ws: WebSocket | undefined): void {
     if (!ws) return;
+    const handlers = this.socketListeners.get(ws);
+    if (!handlers) return;
     try {
-      ws.removeEventListener?.("open", this.handleOpen);
-      ws.removeEventListener?.("error", this.handleError);
-      ws.removeEventListener?.("close", this.handleClose);
-      ws.removeEventListener?.("message", this.handleWsMessage);
+      ws.removeEventListener?.("open", handlers.open);
+      ws.removeEventListener?.("error", handlers.error);
+      ws.removeEventListener?.("close", handlers.close);
+      ws.removeEventListener?.("message", handlers.message);
     } catch {}
+    this.socketListeners.delete(ws);
   }
 
   private startPingTimer(): void {
