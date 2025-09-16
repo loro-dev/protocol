@@ -1,4 +1,3 @@
-#
 # loro-websocket
 
 WebSocket client and a minimal SimpleServer for syncing Loro CRDTs. The client provides connection status events, auto‑reconnect with exponential backoff, latency tracking via ping/pong, safe fragmentation/reassembly for large updates, and seamless room rejoin across reconnects.
@@ -16,7 +15,8 @@ pnpm add loro-crdt
 ```ts
 // In Node, provide a WebSocket implementation
 import { WebSocket } from "ws";
-(globalThis as any).WebSocket = WebSocket as unknown as typeof globalThis.WebSocket;
+(globalThis as any).WebSocket =
+  WebSocket as unknown as typeof globalThis.WebSocket;
 
 import { LoroWebsocketClient, ClientStatus } from "loro-websocket";
 import { createLoroAdaptor } from "loro-adaptors";
@@ -47,11 +47,14 @@ offStatus();
 import { LoroWebsocketClient } from "loro-websocket";
 import { EloLoroAdaptor } from "loro-adaptors";
 
-const key = new Uint8Array(32); key[0] = 1;
+const key = new Uint8Array(32);
+key[0] = 1;
 const client = new LoroWebsocketClient({ url: "ws://localhost:8787" });
 await client.waitConnected();
 
-const adaptor = new EloLoroAdaptor({ getPrivateKey: async () => ({ keyId: "k1", key }) });
+const adaptor = new EloLoroAdaptor({
+  getPrivateKey: async () => ({ keyId: "k1", key }),
+});
 await client.join({ roomId: "secure-room", crdtAdaptor: adaptor });
 
 adaptor.getDoc().getText("t").insert(0, "secret");
@@ -160,6 +163,7 @@ await server.start();
 ## Examples
 
 - Status and reconnect
+
 ```ts
 const client = new LoroWebsocketClient({ url: "ws://localhost:8787" });
 client.onStatusChange(s => console.log("status:", s));
@@ -172,6 +176,7 @@ await client.connect(); // status: Connecting → Connected
 ```
 
 - Latency
+
 ```ts
 const off = client.onLatency(ms => console.log("latency:", ms));
 await client.ping(2000);
@@ -180,6 +185,7 @@ off();
 ```
 
 - Join with auth
+
 ```ts
 await client.join({
   roomId: "project-123",
