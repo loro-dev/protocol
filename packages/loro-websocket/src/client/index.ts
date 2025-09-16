@@ -148,7 +148,7 @@ export class LoroWebsocketClient {
 
     // Start initial connection
     this.connectedPromise = this.createConnectedPromise();
-    this.connect();
+    void this.connect();
   }
 
   private createConnectedPromise() {
@@ -192,7 +192,8 @@ export class LoroWebsocketClient {
   private setStatus(s: ClientStatusValue) {
     if (this.status === s) return;
     this.status = s;
-    for (const cb of [...this.statusListeners]) {
+    const listeners = Array.from(this.statusListeners);
+    for (const cb of listeners) {
       try {
         cb(s);
       } catch {}
@@ -237,9 +238,15 @@ export class LoroWebsocketClient {
   }
 
   private attachSocketListeners(ws: WebSocket): void {
-    const open = () => this.onSocketOpen(ws);
-    const error = (event: Event) => this.onSocketError(ws, event);
-    const close = () => this.onSocketClose(ws);
+    const open = () => {
+      this.onSocketOpen(ws);
+    };
+    const error = (event: Event) => {
+      this.onSocketError(ws, event);
+    };
+    const close = () => {
+      this.onSocketClose(ws);
+    };
     const message = (event: MessageEvent<string | ArrayBuffer>) => {
       void this.onSocketMessage(ws, event);
     };
@@ -383,13 +390,17 @@ export class LoroWebsocketClient {
     for (const [id, adaptor] of this.roomAdaptors) {
       const roomId = this.roomIds.get(id);
       if (!roomId) continue;
+      const active = this.activeRooms.get(id);
+      if (!active) continue;
       // Prepare a lightweight pending entry so JoinError handling can retry version formats
-      const roomPromise = Promise.resolve(this.activeRooms.get(id)?.room!);
+      const roomPromise = Promise.resolve(active.room);
       const pending: PendingRoom = {
         room: roomPromise,
         resolve: (res: JoinResponseOk) => {
           // On successful rejoin, let adaptor reconcile to server
-          adaptor.handleJoinOk(res).catch(e => console.error(e));
+          adaptor.handleJoinOk(res).catch(e => {
+            console.error(e);
+          });
           // Clean up pending entry for this id
           this.pendingRooms.delete(id);
         },
@@ -1043,7 +1054,8 @@ export class LoroWebsocketClient {
       const rtt = Date.now() - this.awaitingPongSince;
       if (rtt >= 0 && isFinite(rtt)) {
         this.lastLatencyMs = rtt;
-        for (const cb of [...this.latencyListeners]) {
+        const listeners = Array.from(this.latencyListeners);
+        for (const cb of listeners) {
           try {
             cb(rtt);
           } catch {}

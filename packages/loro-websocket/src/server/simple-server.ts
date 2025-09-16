@@ -160,7 +160,9 @@ export class SimpleServer {
           .catch(() => {})
           .finally(() => {
             try {
-              wss.close(() => resolve());
+              wss.close(() => {
+                resolve();
+              });
             } catch {
               resolve();
             }
