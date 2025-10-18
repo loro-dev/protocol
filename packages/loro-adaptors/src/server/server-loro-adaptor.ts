@@ -93,15 +93,13 @@ export class LoroServerAdaptor implements CrdtServerAdaptor {
         },
       };
     }
-
     const doc = new LoroDoc();
-    if (documentData.length > 0) {
-      doc.import(documentData);
-    }
-
     const broadcastUpdates: Uint8Array[] = [];
 
     try {
+      if (documentData.length > 0) {
+        doc.import(documentData);
+      }
       for (const update of updates) {
         if (update.length > 0) {
           const importResult = doc.import(update);
