@@ -2,7 +2,6 @@
   "plugins": [
     "node-workspace"
   ],
-  "release-as": "0.1.0",
   "include-component-in-tag": true,
   "bump-minor-pre-major": true,
   "bump-patch-for-minor-pre-major": true,

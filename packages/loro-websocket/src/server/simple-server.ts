@@ -149,11 +149,75 @@ export class SimpleServer {
 
       void this.saveAllDirtyDocuments();
 
-      if (this.wss) {
-        this.wss.close();
+      const wss = this.wss;
+      if (wss) {
+        const clients = Array.from(wss.clients);
+        const closers = Promise.all(
+          clients.map(ws => this.gracefulCloseWebSocket(ws))
+        );
+
+        void closers
+          .catch(() => {})
+          .finally(() => {
+            try {
+              wss.close(() => {
+                resolve();
+              });
+            } catch {
+              resolve();
+            }
+            this.wss = undefined;
+          });
+        return;
       }
 
       resolve();
+    });
+  }
+
+  private async gracefulCloseWebSocket(ws: WebSocket): Promise<void> {
+    try {
+      await this.waitForSocketDrain(ws);
+    } catch {}
+
+    try {
+      ws.close(1001, "Server stopping");
+    } catch {}
+
+    setTimeout(() => {
+      try {
+        if (ws.readyState !== WebSocket.CLOSED) ws.terminate();
+      } catch {}
+    }, 50);
+  }
+
+  private waitForSocketDrain(ws: WebSocket, timeoutMs = 2000): Promise<void> {
+    const readBufferedAmount = (): number | undefined => {
+      const raw = Reflect.get(ws, "bufferedAmount") as unknown;
+      return typeof raw === "number" ? raw : undefined;
+    };
+
+    if (readBufferedAmount() == null) return Promise.resolve();
+
+    return new Promise(resolve => {
+      const start = Date.now();
+      const poll = () => {
+        const state = ws.readyState;
+        if (state === WebSocket.CLOSING || state === WebSocket.CLOSED) {
+          resolve();
+          return;
+        }
+
+        const buffered = readBufferedAmount();
+        if (buffered == null || buffered <= 0 || Date.now() - start >= timeoutMs) {
+          resolve();
+          return;
+        }
+
+        setTimeout(poll, 25);
+      };
+
+      poll();
     });
   }
 
