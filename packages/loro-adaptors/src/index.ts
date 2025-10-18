@@ -1,3 +1,3 @@
 export * from "./types";
 export * from "./adaptors";
-export * from "./server-adaptors";
+export * from "./server";
