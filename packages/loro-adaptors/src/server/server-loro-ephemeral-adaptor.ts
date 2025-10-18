@@ -74,13 +74,12 @@ export class LoroEphemeralServerAdaptor implements CrdtServerAdaptor {
     }
 
     const store = new EphemeralStore(this.timeout);
-    if (documentData.length > 0) {
-      store.apply(documentData);
-    }
-
     const broadcastUpdates: Uint8Array[] = [];
 
     try {
+      if (documentData.length > 0) {
+        store.apply(documentData);
+      }
       for (const update of updates) {
         if (update.length > 0) {
           store.apply(update);
