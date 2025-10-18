@@ -2,8 +2,73 @@ import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { WebSocket } from "ws";
 import getPort from "get-port";
 import { SimpleServer } from "../src/server/simple-server";
+import {
+  registerCrdtDoc,
+  getCrdtDocConstructor,
+  type CrdtDoc,
+  type CrdtDocConstructor,
+} from "../src/server/crdt-doc";
 import { LoroWebsocketClient } from "../src/client";
-import { createLoroAdaptor } from "loro-adaptors";
+import { createLoroAdaptor, loroServerAdaptor } from "loro-adaptors";
+import { CrdtType } from "loro-protocol";
+
+class AdaptorBackedLoroDoc implements CrdtDoc {
+  private data: Uint8Array;
+
+  constructor() {
+    this.data = AdaptorBackedLoroDoc.clone(loroServerAdaptor.createEmpty());
+  }
+
+  private static clone(input: Uint8Array): Uint8Array {
+    return input.length ? new Uint8Array(input) : new Uint8Array();
+  }
+
+  getVersion(): Uint8Array {
+    return AdaptorBackedLoroDoc.clone(loroServerAdaptor.getVersion(this.data));
+  }
+
+  computeBackfill(clientVersion: Uint8Array): Uint8Array[] | null {
+    const version = clientVersion ?? new Uint8Array();
+    const { updates } = loroServerAdaptor.handleJoinRequest(
+      this.data,
+      version,
+      "write"
+    );
+    return updates && updates.length
+      ? updates.map(AdaptorBackedLoroDoc.clone)
+      : null;
+  }
+
+  applyUpdates(updates: Uint8Array[]) {
+    const result = loroServerAdaptor.applyUpdates(this.data, updates, "write");
+    if (!result.success) {
+      const message = result.error?.message ?? "Unknown update failure";
+      return { ok: false as const, error: message };
+    }
+
+    if (result.newDocumentData) {
+      this.data = AdaptorBackedLoroDoc.clone(result.newDocumentData);
+    }
+
+    return { ok: true as const };
+  }
+
+  shouldPersist(): boolean {
+    return true;
+  }
+
+  exportSnapshot(): Uint8Array | null {
+    return this.data.length ? AdaptorBackedLoroDoc.clone(this.data) : null;
+  }
+
+  importSnapshot(data: Uint8Array): void {
+    this.data = AdaptorBackedLoroDoc.clone(data);
+  }
+
+  allowBackfillWhenNoOtherClients(): boolean {
+    return false;
+  }
+}
 
 // Make WebSocket available globally for the client
 Object.defineProperty(globalThis, "WebSocket", {
@@ -15,8 +80,12 @@ Object.defineProperty(globalThis, "WebSocket", {
 describe("E2E: Client-Server Sync", () => {
   let server: SimpleServer;
   let port: number;
+  let restoreLoroCtor: CrdtDocConstructor | undefined;
 
   beforeAll(async () => {
+    restoreLoroCtor = getCrdtDocConstructor(CrdtType.Loro);
+    registerCrdtDoc(CrdtType.Loro, () => new AdaptorBackedLoroDoc());
+
     port = await getPort();
     server = new SimpleServer({ port });
     await server.start();
@@ -24,6 +93,9 @@ describe("E2E: Client-Server Sync", () => {
 
   afterAll(async () => {
     await server.stop();
+    if (restoreLoroCtor) {
+      registerCrdtDoc(CrdtType.Loro, restoreLoroCtor);
+    }
   }, 15000);
 
   it("should sync two clients through server", async () => {
