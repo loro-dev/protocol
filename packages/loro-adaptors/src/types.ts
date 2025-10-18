@@ -3,6 +3,7 @@ import {
   JoinResponseOk,
   JoinError,
   UpdateError,
+  Permission,
 } from "loro-protocol";
 
 export interface CrdtDocAdaptor {
@@ -57,4 +58,44 @@ export interface CrdtAdaptorContext {
   send: (updates: Uint8Array[]) => void;
   onJoinFailed: (reason: string) => void;
   onImportError: (error: Error, data: Uint8Array[]) => void;
+}
+
+export interface CrdtServerAdaptor {
+  readonly crdtType: CrdtType;
+
+  createEmpty(): Uint8Array;
+
+  handleJoinRequest(
+    documentData: Uint8Array,
+    clientVersion: Uint8Array,
+    permission: Permission
+  ): {
+    response: JoinResponseOk;
+    updates?: Uint8Array[];
+  };
+
+  applyUpdates(
+    documentData: Uint8Array,
+    updates: Uint8Array[],
+    permission: Permission
+  ): {
+    success: boolean;
+    newDocumentData?: Uint8Array;
+    error?: UpdateError;
+    broadcastUpdates?: Uint8Array[];
+  };
+
+  getVersion(documentData: Uint8Array): Uint8Array;
+
+  getSize(documentData: Uint8Array): number;
+
+  merge(documents: Uint8Array[]): Uint8Array;
+}
+
+export interface AdaptorsForServer {
+  register(adaptor: CrdtServerAdaptor): void;
+  registerMany(adaptors: Iterable<CrdtServerAdaptor>): void;
+  get(crdtType: CrdtType): CrdtServerAdaptor | undefined;
+  clear(): void;
+  list(): CrdtServerAdaptor[];
 }
