@@ -368,9 +368,9 @@ async function waitForUpdateError(ws: WebSocket): Promise<UpdateError> {
     ws.on("message", (data: unknown) => {
       try {
         const msg = tryDecodeMsg(data);
-        if (msg && msg.type === MessageType.UpdateError) {
+        if (msg?.type === MessageType.UpdateError) {
           clearTimeout(t);
-          resolve(msg as UpdateError);
+          resolve(msg);
         }
       } catch {}
     });

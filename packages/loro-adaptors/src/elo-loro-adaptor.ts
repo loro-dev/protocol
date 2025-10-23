@@ -110,8 +110,11 @@ export class EloLoroAdaptor implements CrdtDocAdaptor {
 
           if (spans.length === 1) {
             const { keyId, key } = await this.config.getPrivateKey();
-            const s = spans[0]!;
-            const peerIdBytes = new TextEncoder().encode(String(s.peer));
+            const [span] = spans;
+            if (!span) {
+              throw new Error("Expected delta span when packaging single update");
+            }
+            const peerIdBytes = new TextEncoder().encode(String(span.peer));
             const iv = this.config.ivFactory
               ? this.config.ivFactory()
               : undefined;
@@ -119,8 +122,8 @@ export class EloLoroAdaptor implements CrdtDocAdaptor {
               updates,
               {
                 peerId: peerIdBytes,
-                start: s.start,
-                end: s.start + s.length,
+                start: span.start,
+                end: span.start + span.length,
                 keyId,
                 iv,
               },
@@ -247,10 +250,11 @@ export class EloLoroAdaptor implements CrdtDocAdaptor {
     const mode = "snapshot";
     const plaintext = this.doc.export({ mode });
     const vvObj = vvToObject(this.doc.version());
+    const encoder = new TextEncoder();
     const vvEntries: Array<{ peerId: Uint8Array; counter: number }> =
       Object.keys(vvObj).map(peer => ({
-        peerId: new TextEncoder().encode(peer),
-        counter: vvObj[peer]!,
+        peerId: encoder.encode(peer),
+        counter: vvObj[peer],
       }));
     const iv = this.config.ivFactory ? this.config.ivFactory() : undefined;
     const { record } = await encryptSnapshot(

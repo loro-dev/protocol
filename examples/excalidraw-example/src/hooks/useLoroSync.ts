@@ -3,7 +3,11 @@ import { throttle } from "throttle-debounce"; // TODO: REVIEW [stability] replac
 import { LoroDoc, EphemeralStore, LoroEventBatch, LoroMap } from "loro-crdt";
 import { LoroWebsocketClient } from "loro-websocket/client";
 import { LoroAdaptor, LoroEphemeralAdaptor } from "loro-adaptors";
-import { ExcalidrawImperativeAPI } from "@excalidraw/excalidraw/types/types";
+import type {
+  AppState as ExcalidrawAppState,
+  ExcalidrawElement,
+  ExcalidrawImperativeAPI,
+} from "@excalidraw/excalidraw/types/types";
 
 interface UseLoroSyncOptions {
   roomId: string;
@@ -27,22 +31,13 @@ interface CursorPosition {
   x: number;
   y: number;
 }
+type AppState = ExcalidrawAppState;
 
-// Minimal type definitions for Excalidraw (to avoid import issues)
-export interface ExcalidrawElement {
-  id: string;
-  type: string;
-  x: number;
-  y: number;
-  width: number;
-  height: number;
-  version: number;
-  [key: string]: any;
-}
-
-export interface AppState {
-  [key: string]: any;
-}
+type SceneUpdateArgs = Parameters<
+  ExcalidrawImperativeAPI["updateScene"]
+>[0];
+type SceneElements = NonNullable<SceneUpdateArgs["elements"]>;
+type SceneAppStateUpdate = NonNullable<SceneUpdateArgs["appState"]>;
 
 export function useLoroSync({
   roomId,
@@ -54,7 +49,8 @@ export function useLoroSync({
 }: UseLoroSyncOptions) {
   const docRef = useRef<LoroDoc | null>(null);
   const clientRef = useRef<LoroWebsocketClient | null>(null);
-  const ephemeralRef = useRef<EphemeralStore<Record<string, any>> | null>(null);
+  const ephemeralRef =
+    useRef<EphemeralStore<Record<string, unknown>> | null>(null);
 
   const [isConnected, setIsConnected] = useState(false);
   const [collaborators, setCollaborators] = useState<Map<string, Collaborator>>(new Map());
@@ -65,7 +61,7 @@ export function useLoroSync({
   useEffect(() => {
     const doc = new LoroDoc();
     const client = new LoroWebsocketClient({ url: wsUrl });
-    const ephemeral = new EphemeralStore<Record<string, any>>(30000); // 30 second timeout
+    const ephemeral = new EphemeralStore<Record<string, unknown>>(30000); // 30 second timeout
 
     docRef.current = doc;
     clientRef.current = client;
@@ -81,7 +77,8 @@ export function useLoroSync({
       if (event.by !== "local") {
         // Build scene data from doc and apply to Excalidraw. Avoid echo via flag.
         // TODO: REVIEW [avoid echo] We set a guard so the next Excalidraw onChange from updateScene is ignored.
-        const newElements = (elementsContainer.toJSON() || []) as ExcalidrawElement[];
+        const newElements =
+          (elementsContainer.toJSON() || []) as SceneElements;
         const newAppState: Partial<AppState> = {};
         for (const [key, value] of appStateContainer.entries()) {
           newAppState[key as keyof AppState] = value;
@@ -90,7 +87,11 @@ export function useLoroSync({
         // Update checksum to match scene state
         const checksum = newElements.reduce((acc, e) => acc + (e?.version || 0), 0);
         lastChecksumRef.current = checksum;
-        excalidrawAPI.current?.updateScene({ elements: newElements as any, appState: newAppState as any });
+        const sceneUpdate: SceneUpdateArgs = { elements: newElements };
+        if (Object.keys(newAppState).length > 0) {
+          sceneUpdate.appState = newAppState as SceneAppStateUpdate;
+        }
+        excalidrawAPI.current?.updateScene(sceneUpdate);
       }
     });
 
@@ -197,6 +198,17 @@ export function useLoroSync({
 
       const doc = docRef.current;
       const list = doc.getList("elements");
+      const getMapAt = (index: number): LoroMap | undefined => {
+        const value = list.get(index);
+        return value instanceof LoroMap ? value : undefined;
+      };
+      const ensureMapAt = (index: number): LoroMap => {
+        const map = getMapAt(index);
+        if (!map) {
+          throw new Error(`Expected LoroMap at index ${index}`);
+        }
+        return map;
+      };
 
       // Filter out deleted
       const filtered = elements.filter(e => !e.isDeleted);
@@ -205,9 +217,9 @@ export function useLoroSync({
       const buildIndex = () => {
         const idx = new Map<string, number>();
         for (let i = 0; i < list.length; i++) {
-          const m = list.get(i) as unknown as LoroMap | undefined;
-          if (!m) continue;
-          const id = m.get("id") as string | undefined;
+          const map = getMapAt(i);
+          if (!map) continue;
+          const id = map.get("id") as string | undefined;
           if (id) idx.set(id, i);
         }
         return idx;
@@ -223,9 +235,9 @@ export function useLoroSync({
         if (pos == null) {
           // New element: insert at the desired position
           list.insertContainer(i, new LoroMap());
-          const m = list.get(i) as unknown as LoroMap;
+          const map = ensureMapAt(i);
           for (const [k, v] of Object.entries(target)) {
-            m.set(k, v);
+            map.set(k, v);
           }
           changed = true;
           indexMap = buildIndex();
@@ -237,9 +249,9 @@ export function useLoroSync({
           list.delete(pos, 1);
           const adjI = pos < i ? i - 1 : i;
           list.insertContainer(adjI, new LoroMap());
-          const m = list.get(adjI) as unknown as LoroMap;
+          const map = ensureMapAt(adjI);
           for (const [k, v] of Object.entries(target)) {
-            m.set(k, v);
+            map.set(k, v);
           }
           changed = true;
           indexMap = buildIndex();
@@ -247,11 +259,11 @@ export function useLoroSync({
         }
 
         // Same position: update only if version changed
-        const m = list.get(i) as unknown as LoroMap;
-        const prevVersion = m.get("version");
+        const map = ensureMapAt(i);
+        const prevVersion = map.get("version");
         if (prevVersion !== target.version) {
           for (const [k, v] of Object.entries(target)) {
-            m.set(k, v);
+            map.set(k, v);
           }
           changed = true;
         }

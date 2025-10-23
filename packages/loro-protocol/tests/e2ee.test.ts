@@ -15,8 +15,11 @@ describe("%ELO container codec", () => {
     const bytes = encodeEloContainer(records);
     const out = decodeEloContainer(bytes);
     expect(out.length).toBe(2);
-    expect(Array.from(out[0]!)).toEqual([1, 2, 3]);
-    expect(Array.from(out[1]!)).toEqual([4]);
+    const first = out[0];
+    const second = out[1];
+    if (!first || !second) throw new Error("Expected two decoded records");
+    expect(Array.from(first)).toEqual([1, 2, 3]);
+    expect(Array.from(second)).toEqual([4]);
   });
 });
 

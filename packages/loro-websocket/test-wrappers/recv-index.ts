@@ -61,7 +61,10 @@ async function main() {
 }
 
 // ESM entrypoint guard
-const isEntrypoint = import.meta.url === pathToFileURL(process.argv[1]!).href;
+const scriptArg = process.argv[1];
+const isEntrypoint =
+  typeof scriptArg === "string" &&
+  import.meta.url === pathToFileURL(scriptArg).href;
 if (isEntrypoint) {
   // eslint-disable-next-line unicorn/prefer-top-level-await
   main().catch(err => {

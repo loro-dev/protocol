@@ -36,7 +36,7 @@ class AdaptorBackedLoroDoc implements CrdtDoc {
       "write"
     );
     return updates && updates.length
-      ? updates.map(AdaptorBackedLoroDoc.clone)
+      ? updates.map(update => AdaptorBackedLoroDoc.clone(update))
       : null;
   }
 
@@ -309,7 +309,9 @@ describe("E2E: Client-Server Sync", () => {
 
     // Getter should reflect last RTT
     const got = client.getLatency();
-    expect(typeof got === "number" && isFinite(got!)).toBe(true);
+    const hasFiniteLatency =
+      typeof got === "number" && Number.isFinite(got);
+    expect(hasFiniteLatency).toBe(true);
 
     // Subscribe again; should emit immediately with current latency
     let immediate: number | undefined;
@@ -651,11 +653,8 @@ function installMockWindow(initialOnline = true) {
     for (const listener of Array.from(set)) {
       if (typeof listener === "function") {
         listener.call(mockWindow, evt);
-      } else if (
-        listener &&
-        typeof (listener as EventListenerObject).handleEvent === "function"
-      ) {
-        (listener as EventListenerObject).handleEvent.call(mockWindow, evt);
+      } else if (isEventListenerObject(listener)) {
+        listener.handleEvent.call(mockWindow, evt);
       }
     }
   };
@@ -671,7 +670,7 @@ function installMockWindow(initialOnline = true) {
       if (originalWindowDescriptor) {
         Object.defineProperty(globalThis, "window", originalWindowDescriptor);
       } else {
-        delete (globalThis as any).window;
+        Reflect.deleteProperty(globalThis, "window");
       }
       if (originalNavigatorDescriptor) {
         Object.defineProperty(
@@ -680,11 +679,22 @@ function installMockWindow(initialOnline = true) {
           originalNavigatorDescriptor
         );
       } else {
-        delete (globalThis as any).navigator;
+        Reflect.deleteProperty(globalThis, "navigator");
       }
       listeners.clear();
     },
   };
+}
+
+function isEventListenerObject(
+  value: EventListenerOrEventListenerObject
+): value is EventListenerObject {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    "handleEvent" in value &&
+    typeof value.handleEvent === "function"
+  );
 }
 
 // Small polling helper for this file

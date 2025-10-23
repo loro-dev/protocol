@@ -185,7 +185,7 @@ describe("Message Encoding and Decoding", () => {
       expect(decoded.type).toBe(MessageType.DocUpdate);
       if (decoded.type !== MessageType.DocUpdate) throw new Error("bad type");
       expect(decoded.updates.length).toBe(1);
-      expect(Array.from(decoded.updates[0]!)).toEqual([111, 222]);
+      expect(Array.from(decoded.updates[0])).toEqual([111, 222]);
     });
 
     it("encodes and decodes DocUpdate with multiple updates", () => {
@@ -206,9 +206,9 @@ describe("Message Encoding and Decoding", () => {
       expect(decoded.type).toBe(MessageType.DocUpdate);
       if (decoded.type !== MessageType.DocUpdate) throw new Error("bad type");
       expect(decoded.updates.length).toBe(3);
-      expect(Array.from(decoded.updates[0]!)).toEqual([1, 2, 3]);
-      expect(Array.from(decoded.updates[1]!)).toEqual([4, 5, 6, 7]);
-      expect(Array.from(decoded.updates[2]!)).toEqual([8]);
+      expect(Array.from(decoded.updates[0])).toEqual([1, 2, 3]);
+      expect(Array.from(decoded.updates[1])).toEqual([4, 5, 6, 7]);
+      expect(Array.from(decoded.updates[2])).toEqual([8]);
     });
 
     it("encodes and decodes DocUpdate with empty updates array", () => {

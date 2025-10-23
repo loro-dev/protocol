@@ -51,7 +51,9 @@ describe("EloLoroAdaptor — snapshot join", () => {
     const [container] = updates;
     const records = decodeEloContainer(container);
     expect(records.length).toBe(1);
-    const parsed = parseEloRecordHeader(records[0]!);
+    const record = records[0];
+    if (!record) throw new Error("Expected an ELO record to be emitted");
+    const parsed = parseEloRecordHeader(record);
     expect(parsed.kind).toBe(0x01); // Snapshot
     expect(parsed.keyId).toBe("k1");
     expect(parsed.iv.length).toBe(12);
