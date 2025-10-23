@@ -28,12 +28,13 @@ export class LoroServerAdaptor implements CrdtServerAdaptor {
     updates?: Uint8Array[];
   } {
     const doc = new LoroDoc();
+    let serverVersion: undefined | VersionVector;
     try {
       if (documentData.length > 0) {
         doc.import(documentData);
       }
 
-      const serverVersion = doc.version();
+      serverVersion = doc.version();
       let updates: Uint8Array[] | undefined;
 
       if (clientVersion.length > 0) {
@@ -68,6 +69,7 @@ export class LoroServerAdaptor implements CrdtServerAdaptor {
       return { response, updates };
     } finally {
       doc.free();
+      serverVersion?.free();
     }
   }
 
@@ -135,18 +137,17 @@ export class LoroServerAdaptor implements CrdtServerAdaptor {
 
   getVersion(documentData: Uint8Array): Uint8Array {
     const doc = new LoroDoc();
+    let version: undefined | VersionVector;
     try {
       if (documentData.length > 0) {
         doc.import(documentData);
       }
-      return doc.version().encode();
+      version = doc.version();
+      return version.encode();
     } finally {
       doc.free();
+      version?.free();
     }
-  }
-
-  getSize(documentData: Uint8Array): number {
-    return documentData.length;
   }
 
   merge(documents: Uint8Array[]): Uint8Array {

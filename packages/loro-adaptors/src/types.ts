@@ -87,8 +87,6 @@ export interface CrdtServerAdaptor {
 
   getVersion(documentData: Uint8Array): Uint8Array;
 
-  getSize(documentData: Uint8Array): number;
-
   merge(documents: Uint8Array[]): Uint8Array;
 }
 

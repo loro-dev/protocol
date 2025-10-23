@@ -98,10 +98,6 @@ export class YjsAwarenessServerAdaptor implements CrdtServerAdaptor {
     return new Uint8Array();
   }
 
-  getSize(documentData: Uint8Array): number {
-    return documentData.length;
-  }
-
   merge(documents: Uint8Array[]): Uint8Array {
     let total = 0;
     for (const d of documents) total += d.length;

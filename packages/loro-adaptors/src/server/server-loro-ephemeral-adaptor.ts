@@ -116,10 +116,6 @@ export class LoroEphemeralServerAdaptor implements CrdtServerAdaptor {
     return new Uint8Array();
   }
 
-  getSize(documentData: Uint8Array): number {
-    return documentData.length;
-  }
-
   merge(documents: Uint8Array[]): Uint8Array {
     const store = new EphemeralStore(this.timeout);
     for (const data of documents) {
