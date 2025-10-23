@@ -1,13 +1,19 @@
 import { useEffect, useRef, useCallback, useState } from "react";
 import { throttle } from "throttle-debounce"; // TODO: REVIEW [stability] replace custom throttle with lib
-import { LoroDoc, EphemeralStore, LoroEventBatch, LoroMap } from "loro-crdt";
+import {
+  LoroDoc,
+  EphemeralStore,
+  LoroEventBatch,
+  LoroMap,
+  type Value,
+} from "loro-crdt";
 import { LoroWebsocketClient } from "loro-websocket/client";
 import { LoroAdaptor, LoroEphemeralAdaptor } from "loro-adaptors";
 import type {
   AppState as ExcalidrawAppState,
-  ExcalidrawElement,
   ExcalidrawImperativeAPI,
 } from "@excalidraw/excalidraw/types/types";
+import type { ExcalidrawElement } from "@excalidraw/excalidraw/types/element/types";
 
 interface UseLoroSyncOptions {
   roomId: string;
@@ -18,19 +24,20 @@ interface UseLoroSyncOptions {
   excalidrawAPI: React.RefObject<ExcalidrawImperativeAPI>;
 }
 
-interface Collaborator {
+interface PresenceEntry extends Record<string, Value> {
   userId: string;
   userName: string;
   userColor: string;
-  cursor?: { x: number; y: number };
+  cursor?: CursorPosition;
   selectedElementIds?: string[];
   lastActive: number;
 }
 
-interface CursorPosition {
+interface CursorPosition extends Record<string, Value> {
   x: number;
   y: number;
 }
+interface Collaborator extends PresenceEntry {}
 type AppState = ExcalidrawAppState;
 
 type SceneUpdateArgs = Parameters<
@@ -38,6 +45,7 @@ type SceneUpdateArgs = Parameters<
 >[0];
 type SceneElements = NonNullable<SceneUpdateArgs["elements"]>;
 type SceneAppStateUpdate = NonNullable<SceneUpdateArgs["appState"]>;
+type PresenceStoreState = Record<string, PresenceEntry>;
 
 export function useLoroSync({
   roomId,
@@ -50,7 +58,7 @@ export function useLoroSync({
   const docRef = useRef<LoroDoc | null>(null);
   const clientRef = useRef<LoroWebsocketClient | null>(null);
   const ephemeralRef =
-    useRef<EphemeralStore<Record<string, unknown>> | null>(null);
+    useRef<EphemeralStore<PresenceStoreState> | null>(null);
 
   const [isConnected, setIsConnected] = useState(false);
   const [collaborators, setCollaborators] = useState<Map<string, Collaborator>>(new Map());
@@ -61,7 +69,7 @@ export function useLoroSync({
   useEffect(() => {
     const doc = new LoroDoc();
     const client = new LoroWebsocketClient({ url: wsUrl });
-    const ephemeral = new EphemeralStore<Record<string, unknown>>(30000); // 30 second timeout
+    const ephemeral = new EphemeralStore<PresenceStoreState>(30000); // 30 second timeout
 
     docRef.current = doc;
     clientRef.current = client;
