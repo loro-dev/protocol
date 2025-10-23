@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.1.5](https://github.com/loro-dev/protocol/compare/loro-websocket-v0.1.4...loro-websocket-v0.1.5) (2025-10-23)
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * loro-adaptors bumped to 0.1.2
+
 ## [0.1.4](https://github.com/loro-dev/protocol/compare/loro-websocket-v0.1.3...loro-websocket-v0.1.4) (2025-10-23)
 
 
