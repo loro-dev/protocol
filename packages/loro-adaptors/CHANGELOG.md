@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.2](https://github.com/loro-dev/protocol/compare/loro-adaptors-v0.1.1...loro-adaptors-v0.1.2) (2025-10-23)
+
+
+### Bug Fixes
+
+* refine server adaptor api and fix a loro mem leak ([41d5f3e](https://github.com/loro-dev/protocol/commit/41d5f3e8fadf203a1e1c67e9eb87c26839141e98))
+
 ## [0.1.1](https://github.com/loro-dev/protocol/compare/loro-adaptors-v0.1.0...loro-adaptors-v0.1.1) (2025-10-23)
 
 
