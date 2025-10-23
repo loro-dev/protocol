@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.1.6](https://github.com/loro-dev/protocol/compare/loro-websocket-v0.1.5...loro-websocket-v0.1.6) (2025-10-23)
+
+
+### Bug Fixes
+
+* should not auto reconnect when kicked ([5272874](https://github.com/loro-dev/protocol/commit/5272874bf3a04c006b021c604ca54bb45d7ffb43))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * loro-adaptors bumped to 0.1.3
+
 ## [0.1.5](https://github.com/loro-dev/protocol/compare/loro-websocket-v0.1.4...loro-websocket-v0.1.5) (2025-10-23)
 
 

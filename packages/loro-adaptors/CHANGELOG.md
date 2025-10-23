@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.3](https://github.com/loro-dev/protocol/compare/loro-adaptors-v0.1.2...loro-adaptors-v0.1.3) (2025-10-23)
+
+
+### Bug Fixes
+
+* server adaptor bug ([8b48b4b](https://github.com/loro-dev/protocol/commit/8b48b4b684ceeb02322cb6ad36b2f5c75cac7a7d))
+
 ## [0.1.2](https://github.com/loro-dev/protocol/compare/loro-adaptors-v0.1.1...loro-adaptors-v0.1.2) (2025-10-23)
 
 
