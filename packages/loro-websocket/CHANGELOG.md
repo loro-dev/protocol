@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.1.4](https://github.com/loro-dev/protocol/compare/loro-websocket-v0.1.3...loro-websocket-v0.1.4) (2025-10-23)
+
+
+### Features
+
+* add server adaptor registry ([#9](https://github.com/loro-dev/protocol/issues/9)) ([ec73f3c](https://github.com/loro-dev/protocol/commit/ec73f3cfe7661844cb73ac2ab5124a6dae8b36d7))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * loro-protocol bumped to 0.1.1
+    * loro-adaptors bumped to 0.1.1
+
 ## [0.1.3](https://github.com/loro-dev/protocol/compare/loro-websocket-v0.1.2...loro-websocket-v0.1.3) (2025-09-23)
 
 
