@@ -38,24 +38,14 @@ export class LoroServerAdaptor implements CrdtServerAdaptor {
       let updates: Uint8Array[] | undefined;
 
       if (clientVersion.length > 0) {
-        try {
-          const clientVV = VersionVector.decode(clientVersion);
-          const comparison = serverVersion.compare(clientVV);
-
-          if (comparison && comparison > 0) {
-            const updateData = doc.export({
-              mode: "update",
-              from: clientVV,
-            });
-            updates = [updateData];
-          }
-        } catch {
-          const snapshot = doc.export({ mode: "snapshot" });
-          updates = [snapshot];
-        }
+        const clientVV = VersionVector.decode(clientVersion);
+        const updateData = doc.export({
+          mode: "update",
+          from: clientVV,
+        });
+        updates = [updateData];
       } else {
-        const snapshot = doc.export({ mode: "snapshot" });
-        updates = [snapshot];
+        updates = [documentData];
       }
 
       const response: JoinResponseOk = {
