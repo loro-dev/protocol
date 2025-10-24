@@ -14,7 +14,7 @@
   "dependencies": {
     "@excalidraw/excalidraw": "^0.17.0",
     "loro-adaptors": "workspace:*",
-    "loro-crdt": "^1.7.1",
+    "loro-crdt": "^1.8.5",
     "loro-websocket": "workspace:*",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",

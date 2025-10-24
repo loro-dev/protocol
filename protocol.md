@@ -23,6 +23,7 @@ Exception: the protocol also defines two out‑of‑band keepalive frames, "ping
   - "%EPH": [Loro Ephemeral Store](https://loro.dev/docs/api/js#ephemeralstore)
   - "%YJS": Yjs
   - "%YAW": Yjs Awareness
+  - "%FLO": Flock Document
   - ...
 - Followed by a `varBytes` room ID (maximum 128 bytes).
   - If two room IDs are the same but the CRDT types differ, they refer to different rooms.

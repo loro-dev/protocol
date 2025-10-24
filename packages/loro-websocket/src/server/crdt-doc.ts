@@ -38,6 +38,10 @@ export function getCrdtDocConstructor(
   return registry.get(type);
 }
 
+export function unregisterCrdtDoc(type: CrdtType): void {
+  registry.delete(type);
+}
+
 // Default implementations
 
 class LoroCrdtDoc implements CrdtDoc {

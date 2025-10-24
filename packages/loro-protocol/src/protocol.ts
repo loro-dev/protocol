@@ -8,6 +8,7 @@ export const CrdtType = {
   Yjs: "%YJS",
   YjsAwareness: "%YAW",
   Elo: "%ELO",
+  Flock: "%FLO",
 } as const;
 export const CrdtTypeId = {
   Loro: "loro",
@@ -15,6 +16,7 @@ export const CrdtTypeId = {
   Yjs: "yjs",
   YjsAwareness: "yaw",
   Elo: "elo",
+  Flock: "flo",
 } as const;
 export type CrdtType = (typeof CrdtType)[keyof typeof CrdtType];
 export type CrdtId = (typeof CrdtTypeId)[keyof typeof CrdtTypeId];
@@ -24,6 +26,7 @@ export const MagicBytesToCrdtId = {
   "%YJS": "yjs",
   "%YAW": "yaw",
   "%ELO": "elo",
+  "%FLO": "flo",
 } as const;
 
 export type Permission = "read" | "write";

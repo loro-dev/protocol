@@ -5,12 +5,18 @@ import { SimpleServer } from "../src/server/simple-server";
 import {
   registerCrdtDoc,
   getCrdtDocConstructor,
+  unregisterCrdtDoc,
   type CrdtDoc,
   type CrdtDocConstructor,
 } from "../src/server/crdt-doc";
 import { LoroWebsocketClient, ClientStatus } from "../src/client";
 import type { LoroWebsocketClientRoom } from "../src/client";
-import { createLoroAdaptor, loroServerAdaptor } from "loro-adaptors";
+import {
+  createFlockAdaptor,
+  createLoroAdaptor,
+  flockServerAdaptor,
+  loroServerAdaptor,
+} from "loro-adaptors";
 import { CrdtType } from "loro-protocol";
 
 class AdaptorBackedLoroDoc implements CrdtDoc {
@@ -71,6 +77,70 @@ class AdaptorBackedLoroDoc implements CrdtDoc {
   }
 }
 
+class AdaptorBackedFlockDoc implements CrdtDoc {
+  private data: Uint8Array;
+
+  constructor() {
+    this.data = AdaptorBackedFlockDoc.clone(flockServerAdaptor.createEmpty());
+  }
+
+  private static clone(input: Uint8Array): Uint8Array {
+    return input.length ? new Uint8Array(input) : new Uint8Array();
+  }
+
+  getVersion(): Uint8Array {
+    return AdaptorBackedFlockDoc.clone(
+      flockServerAdaptor.getVersion(this.data),
+    );
+  }
+
+  computeBackfill(clientVersion: Uint8Array): Uint8Array[] | null {
+    const version = clientVersion ?? new Uint8Array();
+    const { updates } = flockServerAdaptor.handleJoinRequest(
+      this.data,
+      version,
+      "write",
+    );
+    return updates && updates.length
+      ? updates.map(update => AdaptorBackedFlockDoc.clone(update))
+      : null;
+  }
+
+  applyUpdates(updates: Uint8Array[]) {
+    const result = flockServerAdaptor.applyUpdates(
+      this.data,
+      updates,
+      "write",
+    );
+    if (!result.success) {
+      const message = result.error?.message ?? "Unknown update failure";
+      return { ok: false as const, error: message };
+    }
+
+    if (result.newDocumentData) {
+      this.data = AdaptorBackedFlockDoc.clone(result.newDocumentData);
+    }
+
+    return { ok: true as const };
+  }
+
+  shouldPersist(): boolean {
+    return true;
+  }
+
+  exportSnapshot(): Uint8Array | null {
+    return this.data.length ? AdaptorBackedFlockDoc.clone(this.data) : null;
+  }
+
+  importSnapshot(data: Uint8Array): void {
+    this.data = AdaptorBackedFlockDoc.clone(data);
+  }
+
+  allowBackfillWhenNoOtherClients(): boolean {
+    return false;
+  }
+}
+
 // Make WebSocket available globally for the client
 Object.defineProperty(globalThis, "WebSocket", {
   value: WebSocket,
@@ -82,10 +152,13 @@ describe("E2E: Client-Server Sync", () => {
   let server: SimpleServer;
   let port: number;
   let restoreLoroCtor: CrdtDocConstructor | undefined;
+  let restoreFlockCtor: CrdtDocConstructor | undefined;
 
   beforeAll(async () => {
     restoreLoroCtor = getCrdtDocConstructor(CrdtType.Loro);
     registerCrdtDoc(CrdtType.Loro, () => new AdaptorBackedLoroDoc());
+    restoreFlockCtor = getCrdtDocConstructor(CrdtType.Flock);
+    registerCrdtDoc(CrdtType.Flock, () => new AdaptorBackedFlockDoc());
 
     port = await getPort();
     server = new SimpleServer({ port });
@@ -96,6 +169,11 @@ describe("E2E: Client-Server Sync", () => {
     await server.stop();
     if (restoreLoroCtor) {
       registerCrdtDoc(CrdtType.Loro, restoreLoroCtor);
+    }
+    if (restoreFlockCtor) {
+      registerCrdtDoc(CrdtType.Flock, restoreFlockCtor);
+    } else {
+      unregisterCrdtDoc(CrdtType.Flock);
     }
   }, 15000);
 
@@ -156,6 +234,56 @@ describe("E2E: Client-Server Sync", () => {
     // Cleanup
     await room1.destroy();
     await room2.destroy();
+  }, 10000);
+
+  it("should sync Flock adaptors to a consistent state", async () => {
+    const client1 = new LoroWebsocketClient({ url: `ws://localhost:${port}` });
+    const client2 = new LoroWebsocketClient({ url: `ws://localhost:${port}` });
+
+    await Promise.all([client1.waitConnected(), client2.waitConnected()]);
+
+    const adaptor1 = createFlockAdaptor({ peerId: new Uint8Array([0x01]) });
+    const adaptor2 = createFlockAdaptor({ peerId: new Uint8Array([0x02]) });
+
+    const room1 = await client1.join({
+      roomId: "flock-room",
+      crdtAdaptor: adaptor1,
+    });
+    const room2 = await client2.join({
+      roomId: "flock-room",
+      crdtAdaptor: adaptor2,
+    });
+
+    await Promise.all([
+      room1.waitForReachingServerVersion(),
+      room2.waitForReachingServerVersion(),
+    ]);
+
+    const doc1 = adaptor1.getDoc();
+    const doc2 = adaptor2.getDoc();
+
+    doc1.put(["greeting"], "hello");
+    doc2.put(["greeting"], "hello world");
+    doc2.put(["counter"], 1);
+    doc1.put(["nested", "value"], { a: 1, b: true });
+
+    await waitUntil(
+      () => {
+        const state1 = JSON.stringify(doc1.exportJson());
+        const state2 = JSON.stringify(doc2.exportJson());
+        return state1 === state2;
+      },
+      6000,
+      50,
+    );
+
+    expect(doc2.get(["greeting"])).toBe("hello world");
+    expect(doc2.get(["counter"])).toBe(1);
+    expect(doc2.get(["nested", "value"])).toEqual({ a: 1, b: true });
+
+    await Promise.all([room1.destroy(), room2.destroy()]);
+    client1.destroy();
+    client2.destroy();
   }, 10000);
 
   it("should handle client reconnection", async () => {

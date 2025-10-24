@@ -8,7 +8,10 @@ import {
   type Value,
 } from "loro-crdt";
 import { LoroWebsocketClient } from "loro-websocket/client";
-import { LoroAdaptor, LoroEphemeralAdaptor } from "loro-adaptors";
+import {
+  LoroAdaptor,
+  createLoroEphemeralAdaptor,
+} from "loro-adaptors";
 import type {
   AppState as ExcalidrawAppState,
   ExcalidrawImperativeAPI,
@@ -46,6 +49,11 @@ type SceneUpdateArgs = Parameters<
 type SceneElements = NonNullable<SceneUpdateArgs["elements"]>;
 type SceneAppStateUpdate = NonNullable<SceneUpdateArgs["appState"]>;
 type PresenceStoreState = Record<string, PresenceEntry>;
+type EphemeralStoreInstance = ReturnType<typeof createLoroEphemeralAdaptor> extends {
+  getStore(): infer S;
+}
+  ? S
+  : EphemeralStore<PresenceStoreState>;
 
 export function useLoroSync({
   roomId,
@@ -57,8 +65,8 @@ export function useLoroSync({
 }: UseLoroSyncOptions) {
   const docRef = useRef<LoroDoc | null>(null);
   const clientRef = useRef<LoroWebsocketClient | null>(null);
-  const ephemeralRef =
-    useRef<EphemeralStore<PresenceStoreState> | null>(null);
+  const ephemeralRef = useRef<EphemeralStoreInstance | null>(null);
+  const ephemeralAdaptorRef = useRef<ReturnType<typeof createLoroEphemeralAdaptor> | null>(null);
 
   const [isConnected, setIsConnected] = useState(false);
   const [collaborators, setCollaborators] = useState<Map<string, Collaborator>>(new Map());
@@ -69,11 +77,13 @@ export function useLoroSync({
   useEffect(() => {
     const doc = new LoroDoc();
     const client = new LoroWebsocketClient({ url: wsUrl });
-    const ephemeral = new EphemeralStore<PresenceStoreState>(30000); // 30 second timeout
+    const ephAdaptor = createLoroEphemeralAdaptor({ timeout: 30000 });
+    const ephemeral = ephAdaptor.getStore();
 
     docRef.current = doc;
     clientRef.current = client;
     ephemeralRef.current = ephemeral;
+    ephemeralAdaptorRef.current = ephAdaptor;
 
     // Set up document structure
     const elementsContainer = doc.getList("elements");
@@ -121,7 +131,6 @@ export function useLoroSync({
     recalcCollaborators();
     // Join rooms via loro-websocket client and adaptors
     const adaptor = new LoroAdaptor(doc, { peerId: userId });
-    const ephAdaptor = new LoroEphemeralAdaptor(ephemeral, {});
 
     let rooms: { destroy: () => Promise<void> }[] = [];
     client
@@ -148,7 +157,7 @@ export function useLoroSync({
       });
       // Adaptor destroy will also clean underlying stores/docs, but ensure store is destroyed
       try {
-        ephemeral.destroy();
+        ephemeralAdaptorRef.current?.destroy();
       } catch { }
     };
   }, [roomId, userId, wsUrl]);
@@ -157,30 +166,34 @@ export function useLoroSync({
   const updateCursor = useCallback((position: CursorPosition) => {
     if (!ephemeralRef.current) return;
 
-    const currentState = ephemeralRef.current.get(userId) || {};
-    ephemeralRef.current.set(userId, {
+    const currentState = (ephemeralRef.current.get(userId) ??
+      {}) as PresenceEntry;
+    const nextState: PresenceEntry = {
       ...currentState,
       userId,
       userName,
       userColor,
       cursor: position,
       lastActive: Date.now(),
-    });
+    };
+    ephemeralRef.current.set(userId, nextState);
   }, [userId, userName, userColor]);
 
   // Update selected elements
   const updateSelection = useCallback((selectedElementIds: string[]) => {
     if (!ephemeralRef.current) return;
 
-    const currentState = ephemeralRef.current.get(userId) || {};
-    ephemeralRef.current.set(userId, {
+    const currentState = (ephemeralRef.current.get(userId) ??
+      {}) as PresenceEntry;
+    const nextState: PresenceEntry = {
       ...currentState,
       userId,
       userName,
       userColor,
       selectedElementIds,
       lastActive: Date.now(),
-    });
+    };
+    ephemeralRef.current.set(userId, nextState);
   }, [userId, userName, userColor]);
 
   // Record local Excalidraw changes into LoroDoc with minimal ops
