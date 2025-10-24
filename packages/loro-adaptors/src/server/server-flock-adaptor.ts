@@ -1,7 +1,6 @@
 import { Flock } from "@loro-dev/flock";
 import type {
   ExportBundle as FlockExportBundle,
-  ImportReport as FlockImportReport,
   VersionVector as FlockVersion,
 } from "@loro-dev/flock";
 import {
@@ -58,12 +57,12 @@ function deserializeVersion(bytes: Uint8Array): FlockVersion {
       const entry = value as { logicalCounter?: unknown; physicalTime?: unknown };
       const logicalCounter =
         typeof entry.logicalCounter === "number" &&
-        Number.isFinite(entry.logicalCounter)
+          Number.isFinite(entry.logicalCounter)
           ? Math.trunc(entry.logicalCounter)
           : 0;
       const physicalTime =
         typeof entry.physicalTime === "number" &&
-        Number.isFinite(entry.physicalTime)
+          Number.isFinite(entry.physicalTime)
           ? entry.physicalTime
           : 0;
       next[peer] = { logicalCounter, physicalTime };
@@ -176,8 +175,7 @@ export class FlockServerAdaptor implements CrdtServerAdaptor {
             "Asynchronous import is not supported for update payloads",
           );
         }
-        const report = maybeReport as FlockImportReport;
-        if ((report.accepted ?? 0) > 0) {
+        if ((maybeReport.accepted ?? 0) > 0) {
           broadcastUpdates.push(update);
         }
       }
