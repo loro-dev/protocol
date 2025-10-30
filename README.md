@@ -33,23 +33,8 @@ pnpm -r build
 
 2. Start a SimpleServer (Node.js)
 
-Create `examples/simple-server.ts`:
-
-```ts
-import { SimpleServer } from "loro-websocket/server";
-
-const server = new SimpleServer({ port: 8787 });
-server.start().then(() => {
-  // eslint-disable-next-line no-console
-  console.log("SimpleServer listening on ws://localhost:8787");
-});
-```
-
-Run it (Node 18+):
-
 ```bash
-node --loader ts-node/esm examples/simple-server.ts
-# or compile to JS first with your preferred setup
+pnpm dev-simple-server
 ```
 
 3. Connect a client and sync a Loro document
