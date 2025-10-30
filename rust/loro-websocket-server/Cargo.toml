@@ -3,7 +3,7 @@ name = "loro-websocket-server"
 version = "0.1.0"
 edition = "2021"
 description = "Simple async WebSocket server skeleton for the Loro protocol"
-license = "AGPL-3.0-only"
+license = "MIT"
 
 [lib]
 name = "loro_websocket_server"

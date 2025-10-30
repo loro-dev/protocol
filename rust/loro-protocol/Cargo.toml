@@ -3,7 +3,7 @@ name = "loro-protocol"
 version = "0.1.0"
 edition = "2021"
 description = "Rust implementation of the Loro Syncing Protocol encoder/decoder"
-license = "AGPL-3.0-only"
+license = "MIT"
 repository = "https://example.com/"
 readme = false
 

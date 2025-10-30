@@ -179,7 +179,7 @@ Node 18+ is required for local development.
 - `loro-protocol`: MIT
 - `loro-websocket`: MIT
 - `loro-adaptors`: MIT
-- Rust workspace crates under `rust/`: AGPL-3.0-only
+- Rust workspace crates under `rust/`: MIT
 
 ## Project Structure
 
