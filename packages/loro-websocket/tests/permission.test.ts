@@ -3,7 +3,7 @@ import { WebSocket } from "ws";
 import getPort from "get-port";
 import { SimpleServer } from "../src/server/simple-server";
 import { LoroWebsocketClient } from "../src/client";
-import { createLoroAdaptor } from "loro-adaptors";
+import { LoroAdaptor } from "loro-adaptors";
 
 // Make WebSocket available globally for the client
 Object.defineProperty(globalThis, "WebSocket", {
@@ -44,8 +44,8 @@ describe("Permission Enforcement", () => {
     await writeClient.waitConnected();
     await readClient.waitConnected();
 
-    const writeAdaptor = createLoroAdaptor({ peerId: 100 });
-    const readAdaptor = createLoroAdaptor({ peerId: 200 });
+    const writeAdaptor = new LoroAdaptor();
+    const readAdaptor = new LoroAdaptor();
 
     // Join the same room with different permissions
     const writeRoom = await writeClient.join({

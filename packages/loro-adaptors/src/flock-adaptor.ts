@@ -39,7 +39,7 @@ function deserializeVersion(bytes: Uint8Array): FlockVersion {
     if (!parsed || typeof parsed !== "object") return {};
     const next: FlockVersion = {};
     for (const [key, value] of Object.entries(
-      parsed as Record<string, unknown>,
+      parsed as Record<string, unknown>
     )) {
       if (!value || typeof value !== "object") continue;
       const entry = value as {
@@ -66,7 +66,7 @@ function deserializeVersion(bytes: Uint8Array): FlockVersion {
 
 function compareVersions(
   a: FlockVersion,
-  b: FlockVersion,
+  b: FlockVersion
 ): -1 | 0 | 1 | undefined {
   let greater = false;
   let less = false;
@@ -113,10 +113,6 @@ function deserializeBundle(bytes: Uint8Array): FlockExportBundle {
 export interface FlockAdaptorConfig {
   onImportError?: (error: Error, data: Uint8Array[]) => void;
   onUpdateError?: (error: UpdateError) => void;
-}
-
-export interface CreateFlockAdaptorOptions extends FlockAdaptorConfig {
-  peerId?: Uint8Array;
 }
 
 /**
@@ -174,12 +170,12 @@ export class FlockAdaptor implements CrdtDocAdaptor {
       this.unsubscribe();
       this.unsubscribe = undefined;
     }
-    this.unsubscribe = this.flock.subscribe((batch) => {
+    this.unsubscribe = this.flock.subscribe(batch => {
       if (this.destroyed) return;
       if (batch.source !== "local") return;
       if (!this.ctx) return;
       const update = serializeBundle(
-        this.flock.exportJson(this.lastExportVersion),
+        this.flock.exportJson(this.lastExportVersion)
       );
       this.lastExportVersion = cloneVersion(this.flock.version());
       this.ctx.send([update]);
@@ -240,7 +236,7 @@ export class FlockAdaptor implements CrdtDocAdaptor {
     if (this.initServerVersion && !this.hasReachedServerVersion) {
       const comparison = compareVersions(
         this.flock.version(),
-        this.initServerVersion,
+        this.initServerVersion
       );
       if (comparison != null && comparison >= 0) {
         this.markReachedServerVersion();
@@ -267,19 +263,4 @@ export class FlockAdaptor implements CrdtDocAdaptor {
     this.hasReachedServerVersion = true;
     this.reachServerVersionPromise.resolve();
   }
-}
-
-export function createFlockAdaptor(
-  options: CreateFlockAdaptorOptions = {},
-): FlockAdaptor {
-  const { peerId, ...rest } = options;
-  const flock = new Flock(peerId);
-  return new FlockAdaptor(flock, rest);
-}
-
-export function createFlockAdaptorFromDoc(
-  flock: Flock,
-  config: FlockAdaptorConfig = {},
-): FlockAdaptor {
-  return new FlockAdaptor(flock, config);
 }

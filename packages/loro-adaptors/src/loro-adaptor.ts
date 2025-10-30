@@ -1,11 +1,13 @@
 import { LoroDoc, VersionVector } from "loro-crdt";
-import { CrdtType, JoinError, JoinResponseOk, UpdateError } from "loro-protocol";
+import {
+  CrdtType,
+  JoinError,
+  JoinResponseOk,
+  UpdateError,
+} from "loro-protocol";
 import type { CrdtAdaptorContext, CrdtDocAdaptor } from "./types";
 
 export interface LoroAdaptorConfig {
-  recordTimestamp?: boolean;
-  changeMergeInterval?: number;
-  peerId?: number | bigint | string;
   onImportError?: (error: Error, data: Uint8Array[]) => void;
   onUpdateError?: (error: UpdateError) => void;
 }
@@ -19,28 +21,23 @@ export class LoroAdaptor implements CrdtDocAdaptor {
   private localUpdateUnsubscribe?: () => void;
   private destroyed = false;
   private initServerVersion?: VersionVector;
-  private reachServerVersionPromise: { promise: Promise<void>; resolve: () => void; reject: (err: Error) => void };
+  private reachServerVersionPromise: {
+    promise: Promise<void>;
+    resolve: () => void;
+    reject: (err: Error) => void;
+  };
   private hasReachedServerVersion = false;
 
   constructor(doc?: LoroDoc, config: LoroAdaptorConfig = {}) {
     this.doc = doc || new LoroDoc();
     this.config = config;
 
-    if (config.peerId !== undefined) {
-      const pid = typeof config.peerId === "string" ? Number(config.peerId) : config.peerId;
-      this.doc.setPeerId(pid);
-    }
-    if (config.recordTimestamp !== undefined) {
-      this.doc.setRecordTimestamp(config.recordTimestamp);
-    }
-    if (config.changeMergeInterval !== undefined) {
-      this.doc.setChangeMergeInterval(config.changeMergeInterval);
-    }
     {
       let resolve!: () => void;
       let reject!: (err: Error) => void;
       const promise = new Promise<void>((res, rej) => {
-        resolve = res; reject = rej;
+        resolve = res;
+        reject = rej;
       });
       this.reachServerVersionPromise = { promise, resolve, reject };
       void this.reachServerVersionPromise.promise.then(() => {
@@ -102,7 +99,10 @@ export class LoroAdaptor implements CrdtDocAdaptor {
         }
 
         if (comparison == null || comparison === 1) {
-          const updates = this.doc.export({ mode: "update", from: serverVersion });
+          const updates = this.doc.export({
+            mode: "update",
+            from: serverVersion,
+          });
           this.ctx?.send([updates]);
         }
       } else {
@@ -110,7 +110,9 @@ export class LoroAdaptor implements CrdtDocAdaptor {
         this.ctx?.send([updates]);
       }
     } catch (error) {
-      this.ctx!.onJoinFailed(error instanceof Error ? error.message : String(error));
+      this.ctx!.onJoinFailed(
+        error instanceof Error ? error.message : String(error)
+      );
       throw error;
     }
   }
@@ -124,7 +126,10 @@ export class LoroAdaptor implements CrdtDocAdaptor {
         // Pending updates may occur when concurrent changes happen
       }
     } catch (error) {
-      this.ctx!.onImportError(error instanceof Error ? error : new Error(String(error)), updates);
+      this.ctx!.onImportError(
+        error instanceof Error ? error : new Error(String(error)),
+        updates
+      );
     }
 
     if (this.initServerVersion && !this.hasReachedServerVersion) {
@@ -152,12 +157,3 @@ export class LoroAdaptor implements CrdtDocAdaptor {
     this.ctx = undefined;
   }
 }
-
-export function createLoroAdaptor(config: LoroAdaptorConfig = {}): LoroAdaptor {
-  return new LoroAdaptor(new LoroDoc(), config);
-}
-
-export function createLoroAdaptorFromDoc(doc: LoroDoc, config: LoroAdaptorConfig = {}): LoroAdaptor {
-  return new LoroAdaptor(doc, config);
-}
-

@@ -3,7 +3,6 @@ import { WebSocket } from "ws";
 import getPort from "get-port";
 import { SimpleServer } from "../src/server/simple-server";
 import { LoroWebsocketClient } from "../src/client";
-import { createEloLoroAdaptor } from "loro-adaptors";
 import {
   encode,
   encodeEloContainer,
@@ -13,6 +12,7 @@ import {
   type ProtocolMessage,
   type UpdateError,
 } from "loro-protocol";
+import { EloAdaptor } from "loro-adaptors";
 
 // Make WebSocket available globally for the client
 Object.defineProperty(globalThis, "WebSocket", {
@@ -59,10 +59,10 @@ describe("E2E: %ELO join/backfill and live updates", () => {
 
     const key = new Uint8Array(16);
     key[0] = 1;
-    const adaptor1 = createEloLoroAdaptor({
+    const adaptor1 = new EloAdaptor({
       getPrivateKey: async () => ({ keyId: "k1", key }),
     });
-    const adaptor2 = createEloLoroAdaptor({
+    const adaptor2 = new EloAdaptor({
       getPrivateKey: async () => ({ keyId: "k1", key }),
     });
 
@@ -109,10 +109,10 @@ describe("E2E: %ELO join/backfill and live updates", () => {
 
     const key = new Uint8Array(16);
     key[0] = 2;
-    const adaptor1 = createEloLoroAdaptor({
+    const adaptor1 = new EloAdaptor({
       getPrivateKey: async () => ({ keyId: "k1", key }),
     });
-    const adaptor2 = createEloLoroAdaptor({
+    const adaptor2 = new EloAdaptor({
       getPrivateKey: async () => ({ keyId: "k1", key }),
     });
 
@@ -291,10 +291,10 @@ describe("E2E: %ELO decrypt failure and unknown key handling", () => {
     const key2 = new Uint8Array(16);
     key2[0] = 4;
     let decryptErrorCalled = false;
-    const adaptor1 = createEloLoroAdaptor({
+    const adaptor1 = new EloAdaptor({
       getPrivateKey: async () => ({ keyId: "k1", key: key1 }),
     });
-    const adaptor2 = createEloLoroAdaptor({
+    const adaptor2 = new EloAdaptor({
       getPrivateKey: async () => ({ keyId: "k2", key: key2 }),
       onDecryptError: () => {
         decryptErrorCalled = true;

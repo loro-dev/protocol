@@ -30,7 +30,7 @@ export interface EloLoroAdaptorConfig {
   onUpdateError?: (error: UpdateError) => void;
 }
 
-export class EloLoroAdaptor implements CrdtDocAdaptor {
+export class EloAdaptor implements CrdtDocAdaptor {
   readonly crdtType = CrdtType.Elo;
 
   private doc: LoroDoc;
@@ -112,7 +112,9 @@ export class EloLoroAdaptor implements CrdtDocAdaptor {
             const { keyId, key } = await this.config.getPrivateKey();
             const [span] = spans;
             if (!span) {
-              throw new Error("Expected delta span when packaging single update");
+              throw new Error(
+                "Expected delta span when packaging single update"
+              );
             }
             const peerIdBytes = new TextEncoder().encode(String(span.peer));
             const iv = this.config.ivFactory
@@ -345,12 +347,6 @@ export class EloLoroAdaptor implements CrdtDocAdaptor {
       }
     }
   }
-}
-
-export function createEloLoroAdaptor(
-  config: EloLoroAdaptorConfig
-): EloLoroAdaptor {
-  return new EloLoroAdaptor(new LoroDoc(), config);
 }
 
 // Compute spans from start and end version vectors represented as plain objects

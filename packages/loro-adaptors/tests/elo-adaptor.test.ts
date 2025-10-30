@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { LoroDoc } from "loro-crdt";
-import { EloLoroAdaptor } from "../src/adaptors";
+import { EloAdaptor } from "../src/adaptors";
 import { CrdtType, MessageType } from "loro-protocol";
 import { parseEloRecordHeader, decodeEloContainer } from "loro-protocol";
 import { encryptDeltaSpan, encodeEloContainer } from "loro-protocol";
@@ -17,13 +17,13 @@ function hexToBytes(hex: string): Uint8Array {
 
 describe("EloLoroAdaptor — snapshot join", () => {
   let doc: LoroDoc;
-  let adaptor: EloLoroAdaptor;
+  let adaptor: EloAdaptor;
   const key = hexToBytes(KEY_HEX);
   const fixedIv = hexToBytes("0x0102030405060708090a0b0c");
 
   beforeEach(() => {
     doc = new LoroDoc();
-    adaptor = new EloLoroAdaptor(doc, {
+    adaptor = new EloAdaptor(doc, {
       getPrivateKey: async () => ({ keyId: "k1", key }),
       ivFactory: () => fixedIv,
     });
@@ -70,7 +70,7 @@ describe("EloLoroAdaptor — apply snapshot update", () => {
     const plaintext = source.export({ mode: "snapshot" });
 
     const adaptorDoc = new LoroDoc();
-    const adaptor = new EloLoroAdaptor(adaptorDoc, {
+    const adaptor = new EloAdaptor(adaptorDoc, {
       getPrivateKey: async () => ({ keyId: "k1", key }),
       ivFactory: () => hexToBytes("0x0102030405060708090a0b0c"),
     });
@@ -109,7 +109,7 @@ describe("EloLoroAdaptor — apply delta update", () => {
     const plaintext = source.export({ mode: "update" });
 
     const adaptorDoc = new LoroDoc();
-    const adaptor = new EloLoroAdaptor(adaptorDoc, {
+    const adaptor = new EloAdaptor(adaptorDoc, {
       getPrivateKey: async () => ({ keyId: "k1", key }),
       ivFactory: () => hexToBytes("0x0102030405060708090a0b0c"),
     });

@@ -1,10 +1,6 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import { LoroDoc, EphemeralStore, VersionVector } from "loro-crdt";
-import {
-  LoroAdaptor,
-  LoroEphemeralAdaptor,
-  createLoroAdaptor,
-} from "../src/adaptors";
+import { LoroAdaptor, LoroEphemeralAdaptor } from "../src/adaptors";
 import { CrdtType, JoinResponseOk, MessageType } from "loro-protocol";
 
 describe("LoroAdaptor", () => {
@@ -131,13 +127,8 @@ describe("LoroEphemeralAdaptor", () => {
 
 describe("Utility functions", () => {
   it("should create LoroAdaptor with new LoroDoc", () => {
-    const adaptor = createLoroAdaptor();
+    const adaptor = new LoroAdaptor();
     expect(adaptor).toBeInstanceOf(LoroAdaptor);
     expect(adaptor.getDoc()).toBeInstanceOf(LoroDoc);
-  });
-
-  it("should create LoroAdaptor with configuration", () => {
-    const adaptor = createLoroAdaptor({ peerId: "54321" });
-    expect(adaptor.getDoc().peerIdStr).toBe("54321");
   });
 });

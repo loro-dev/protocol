@@ -20,7 +20,11 @@ The websocket client (`loro-websocket`) speaks the binary wire protocol. These a
 
 ```ts
 import { LoroWebsocketClient } from "loro-websocket";
-import { LoroAdaptor, LoroEphemeralAdaptor, EloLoroAdaptor } from "loro-adaptors";
+import {
+  LoroAdaptor,
+  LoroEphemeralAdaptor,
+  EloLoroAdaptor,
+} from "loro-adaptors";
 import { LoroDoc, EphemeralStore } from "loro-crdt";
 
 const client = new LoroWebsocketClient({ url: "ws://localhost:8787" });
@@ -28,17 +32,20 @@ await client.waitConnected();
 
 // Plain Loro document
 const doc = new LoroDoc();
-const docAdaptor = new LoroAdaptor(doc, { peerId: 1 });
+doc.setPeerId(1); // configure the underlying document directly
+const docAdaptor = new LoroAdaptor(doc);
 const roomDoc = await client.join({ roomId: "demo", crdtAdaptor: docAdaptor });
 
 // Ephemeral presence
-const eph = new EphemeralStore();
+const eph = new EphemeralStore(30_000);
 const ephAdaptor = new LoroEphemeralAdaptor(eph);
 const roomEph = await client.join({ roomId: "demo", crdtAdaptor: ephAdaptor });
 
 // %ELO (end‑to‑end encrypted Loro)
 const key = new Uint8Array(32);
-const elo = new EloLoroAdaptor({ getPrivateKey: async () => ({ keyId: "k1", key }) });
+const elo = new EloLoroAdaptor({
+  getPrivateKey: async () => ({ keyId: "k1", key }),
+});
 const secure = await client.join({ roomId: "secure-room", crdtAdaptor: elo });
 
 // Edits
@@ -53,14 +60,14 @@ await secure.destroy();
 
 ## API
 
-- `new LoroAdaptor(doc?: LoroDoc, config?: { peerId?, recordTimestamp?, changeMergeInterval?, onUpdateError? })`
-- `new LoroEphemeralAdaptor(store?: EphemeralStore, config?: { timeout?, onUpdateError? })`
+- `new LoroAdaptor(doc?: LoroDoc, config?: { onImportError?, onUpdateError? })`
+- `new LoroEphemeralAdaptor(store?: EphemeralStore)`
 - `new EloLoroAdaptor(docOrConfig: LoroDoc | { getPrivateKey, ivFactory?, onDecryptError?, onUpdateError? })`
   - `getPrivateKey: (keyId?) => Promise<{ keyId: string, key: CryptoKey | Uint8Array }>`
   - Optional `ivFactory()` for testing (12‑byte IV)
-- Helpers: `createLoroAdaptor`, `createLoroAdaptorFromDoc`, `createLoroEphemeralAdaptor`, `createLoroEphemeralAdaptorFromStore`, `createEloLoroAdaptor`
 
 Notes (E2EE)
+
 - IV must be 12 bytes and unique per key. The `ivFactory` is for tests only.
 - The server never decrypts; it indexes plaintext headers to select backfill.
 

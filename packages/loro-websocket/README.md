@@ -19,7 +19,7 @@ import { WebSocket } from "ws";
   WebSocket as unknown as typeof globalThis.WebSocket;
 
 import { LoroWebsocketClient, ClientStatus } from "loro-websocket";
-import { createLoroAdaptor } from "loro-adaptors";
+import { LoroAdaptor } from "loro-adaptors";
 
 const client = new LoroWebsocketClient({ url: "ws://localhost:8787" });
 
@@ -29,7 +29,7 @@ const offStatus = client.onStatusChange(s => console.log("status:", s));
 await client.waitConnected();
 
 // Join a room with a CRDT adaptor
-const adaptor = createLoroAdaptor({ peerId: 1 });
+const adaptor = new LoroAdaptor();
 const room = await client.join({ roomId: "demo", crdtAdaptor: adaptor });
 
 // Edit document and sync
@@ -186,9 +186,11 @@ off();
 - Join with auth
 
 ```ts
+const adaptor = new LoroAdaptor();
+adaptor.getDoc().setPeerId(42);
 await client.join({
   roomId: "project-123",
-  crdtAdaptor: createLoroAdaptor({ peerId: 42 }),
+  crdtAdaptor: adaptor,
   auth: new TextEncoder().encode("write-token"),
 });
 ```

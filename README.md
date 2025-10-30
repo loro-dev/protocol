@@ -56,7 +56,8 @@ node --loader ts-node/esm examples/simple-server.ts
 
 ```ts
 // examples/client.ts
-import { LoroWebsocketClient, createLoroAdaptor } from "loro-websocket";
+import { LoroWebsocketClient } from "loro-websocket";
+import { LoroAdaptor } from "loro-adaptors";
 
 // In Node, provide a WebSocket implementation
 import { WebSocket } from "ws";
@@ -65,7 +66,7 @@ import { WebSocket } from "ws";
 const client = new LoroWebsocketClient({ url: "ws://localhost:8787" });
 await client.waitConnected();
 
-const adaptor = createLoroAdaptor({ peerId: 1 });
+const adaptor = new LoroAdaptor();
 const room = await client.join({ roomId: "demo-room", crdtAdaptor: adaptor });
 
 // Edit the shared doc

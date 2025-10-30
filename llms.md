@@ -30,16 +30,16 @@ end-to-end encrypted extension, and the full surface of the
 
 ### 1.1 Message Types
 
-| Type ID | Name                       | Payload Summary |
-|--------:|----------------------------|-----------------|
-| `0x00`  | `JoinRequest`              | `varBytes auth`, `varBytes version`. |
-| `0x01`  | `JoinResponseOk`           | `varString permission ("read"/"write")`, `varBytes version`, `varBytes extraMetadata`. |
-| `0x02`  | `JoinError`                | `u8 code`, `varString message`, optional `varBytes receiverVersion` when `code=version_unknown`. |
-| `0x03`  | `DocUpdate`                | `varUint N` updates followed by `N` `varBytes` chunks. |
-| `0x04`  | `DocUpdateFragmentHeader`  | `8-byte batchId`, `varUint fragmentCount`, `varUint totalSizeBytes`. |
-| `0x05`  | `DocUpdateFragment`        | `8-byte batchId`, `varUint index`, `varBytes fragment`. |
-| `0x06`  | `UpdateError`              | `u8 code`, `varString message`, optional batch ID when `code=fragment_timeout`. |
-| `0x07`  | `Leave`                    | No additional payload. |
+| Type ID | Name                      | Payload Summary                                                                                  |
+| ------: | ------------------------- | ------------------------------------------------------------------------------------------------ |
+|  `0x00` | `JoinRequest`             | `varBytes auth`, `varBytes version`.                                                             |
+|  `0x01` | `JoinResponseOk`          | `varString permission ("read"/"write")`, `varBytes version`, `varBytes extraMetadata`.           |
+|  `0x02` | `JoinError`               | `u8 code`, `varString message`, optional `varBytes receiverVersion` when `code=version_unknown`. |
+|  `0x03` | `DocUpdate`               | `varUint N` updates followed by `N` `varBytes` chunks.                                           |
+|  `0x04` | `DocUpdateFragmentHeader` | `8-byte batchId`, `varUint fragmentCount`, `varUint totalSizeBytes`.                             |
+|  `0x05` | `DocUpdateFragment`       | `8-byte batchId`, `varUint index`, `varBytes fragment`.                                          |
+|  `0x06` | `UpdateError`             | `u8 code`, `varString message`, optional batch ID when `code=fragment_timeout`.                  |
+|  `0x07` | `Leave`                   | No additional payload.                                                                           |
 
 ### 1.2 Sync Lifecycle
 
@@ -169,7 +169,7 @@ tracking, and room management. Designed to pair with CRDT adaptors from
 
 ```ts
 import { LoroWebsocketClient } from "loro-websocket";
-import { createLoroAdaptor } from "loro-adaptors";
+import { LoroAdaptor } from "loro-adaptors";
 
 // In Node, provide a WebSocket implementation:
 import { WebSocket } from "ws";
@@ -181,7 +181,7 @@ await client.waitConnected();
 
 Adaptors bridge the client to actual CRDT state:
 
-- `createLoroAdaptor({ peerId })` – Loro document.
+- `LoroAdaptor` – Loro document (`const adaptor = new LoroAdaptor()`).
 - `LoroEphemeralAdaptor` – transient presence (`%EPH`).
 - `EloLoroAdaptor` – `%ELO` encrypted Loro with `getPrivateKey()`.
 
@@ -232,7 +232,8 @@ failure.
 ### 3.6 Room Management
 
 ```ts
-const adaptor = createLoroAdaptor({ peerId: 1 });
+const adaptor = new LoroAdaptor();
+adaptor.getDoc().setPeerId(1);
 const room = await client.join({
   roomId: "doc-123",
   crdtAdaptor: adaptor,

@@ -12,12 +12,13 @@ import {
 import { LoroWebsocketClient, ClientStatus } from "../src/client";
 import type { LoroWebsocketClientRoom } from "../src/client";
 import {
-  createFlockAdaptor,
-  createLoroAdaptor,
+  FlockAdaptor,
   flockServerAdaptor,
+  LoroAdaptor,
   loroServerAdaptor,
 } from "loro-adaptors";
 import { CrdtType } from "loro-protocol";
+import { Flock } from "@loro-dev/flock";
 
 class AdaptorBackedLoroDoc implements CrdtDoc {
   private data: Uint8Array;
@@ -90,7 +91,7 @@ class AdaptorBackedFlockDoc implements CrdtDoc {
 
   getVersion(): Uint8Array {
     return AdaptorBackedFlockDoc.clone(
-      flockServerAdaptor.getVersion(this.data),
+      flockServerAdaptor.getVersion(this.data)
     );
   }
 
@@ -99,7 +100,7 @@ class AdaptorBackedFlockDoc implements CrdtDoc {
     const { updates } = flockServerAdaptor.handleJoinRequest(
       this.data,
       version,
-      "write",
+      "write"
     );
     return updates && updates.length
       ? updates.map(update => AdaptorBackedFlockDoc.clone(update))
@@ -107,11 +108,7 @@ class AdaptorBackedFlockDoc implements CrdtDoc {
   }
 
   applyUpdates(updates: Uint8Array[]) {
-    const result = flockServerAdaptor.applyUpdates(
-      this.data,
-      updates,
-      "write",
-    );
+    const result = flockServerAdaptor.applyUpdates(this.data, updates, "write");
     if (!result.success) {
       const message = result.error?.message ?? "Unknown update failure";
       return { ok: false as const, error: message };
@@ -186,9 +183,9 @@ describe("E2E: Client-Server Sync", () => {
     await client2.waitConnected();
 
     // Create adaptors with separate documents
-    const adaptor1 = createLoroAdaptor({ peerId: 1 });
+    const adaptor1 = new LoroAdaptor();
 
-    const adaptor2 = createLoroAdaptor({ peerId: 2 });
+    const adaptor2 = new LoroAdaptor();
 
     // Join the same room
     const room1 = await client1.join({
@@ -242,8 +239,8 @@ describe("E2E: Client-Server Sync", () => {
 
     await Promise.all([client1.waitConnected(), client2.waitConnected()]);
 
-    const adaptor1 = createFlockAdaptor({ peerId: new Uint8Array([0x01]) });
-    const adaptor2 = createFlockAdaptor({ peerId: new Uint8Array([0x02]) });
+    const adaptor1 = new FlockAdaptor(new Flock());
+    const adaptor2 = new FlockAdaptor(new Flock());
 
     const room1 = await client1.join({
       roomId: "flock-room",
@@ -274,7 +271,7 @@ describe("E2E: Client-Server Sync", () => {
         return state1 === state2;
       },
       6000,
-      50,
+      50
     );
 
     expect(doc2.get(["greeting"])).toBe("hello world");
@@ -290,7 +287,7 @@ describe("E2E: Client-Server Sync", () => {
     const client1 = new LoroWebsocketClient({ url: `ws://localhost:${port}` });
     await client1.waitConnected();
 
-    const adaptor1 = createLoroAdaptor({ peerId: 3 });
+    const adaptor1 = new LoroAdaptor();
 
     // Join room and make changes
     const room1 = await client1.join({
@@ -312,7 +309,7 @@ describe("E2E: Client-Server Sync", () => {
     await client2.waitConnected();
 
     // Create fresh adaptor but with existing document state
-    const adaptor2 = createLoroAdaptor({ peerId: 4 });
+    const adaptor2 = new LoroAdaptor();
 
     // Rejoin same room
     const room2 = await client2.join({
@@ -357,11 +354,7 @@ describe("E2E: Client-Server Sync", () => {
     await server.stop();
 
     // Wait until client reports Disconnected
-    await waitUntil(
-      () => seen.includes(ClientStatus.Disconnected),
-      5000,
-      25
-    );
+    await waitUntil(() => seen.includes(ClientStatus.Disconnected), 5000, 25);
 
     // Bring server back; client should auto-reconnect
     await server.start();
@@ -437,8 +430,7 @@ describe("E2E: Client-Server Sync", () => {
 
     // Getter should reflect last RTT
     const got = client.getLatency();
-    const hasFiniteLatency =
-      typeof got === "number" && Number.isFinite(got);
+    const hasFiniteLatency = typeof got === "number" && Number.isFinite(got);
     expect(hasFiniteLatency).toBe(true);
 
     // Subscribe again; should emit immediately with current latency
@@ -458,8 +450,8 @@ describe("E2E: Client-Server Sync", () => {
     const client2 = new LoroWebsocketClient({ url: `ws://localhost:${port}` });
     await Promise.all([client1.waitConnected(), client2.waitConnected()]);
 
-    const adaptor1 = createLoroAdaptor({ peerId: 11 });
-    const adaptor2 = createLoroAdaptor({ peerId: 22 });
+    const adaptor1 = new LoroAdaptor();
+    const adaptor2 = new LoroAdaptor();
 
     await client1.join({ roomId: "rejoin-room", crdtAdaptor: adaptor1 });
     await client2.join({ roomId: "rejoin-room", crdtAdaptor: adaptor2 });
@@ -517,8 +509,8 @@ describe("E2E: Client-Server Sync", () => {
         s => s === ClientStatus.Connected
       ).length;
 
-      const adaptor1 = createLoroAdaptor({ peerId: 31 });
-      const adaptor2 = createLoroAdaptor({ peerId: 32 });
+      const adaptor1 = new LoroAdaptor();
+      const adaptor2 = new LoroAdaptor();
 
       const [room1, room2] = await Promise.all([
         client1.join({ roomId: "offline-room", crdtAdaptor: adaptor1 }),
@@ -606,8 +598,8 @@ describe("E2E: Client-Server Sync", () => {
         s => s === ClientStatus.Connected
       ).length;
 
-      const adaptor1 = createLoroAdaptor({ peerId: 41 });
-      const adaptor2 = createLoroAdaptor({ peerId: 42 });
+      const adaptor1 = new LoroAdaptor();
+      const adaptor2 = new LoroAdaptor();
 
       [room1, room2] = await Promise.all([
         client1.join({ roomId: "offline-no-online", crdtAdaptor: adaptor1 }),
@@ -734,7 +726,10 @@ function installMockWindow(initialOnline = true) {
   const state = { online: initialOnline };
 
   const mockWindow = {
-    addEventListener(type: string, listener: EventListenerOrEventListenerObject) {
+    addEventListener(
+      type: string,
+      listener: EventListenerOrEventListenerObject
+    ) {
       if (!listener) return;
       let set = listeners.get(type);
       if (!set) {
@@ -743,7 +738,10 @@ function installMockWindow(initialOnline = true) {
       }
       set.add(listener);
     },
-    removeEventListener(type: string, listener: EventListenerOrEventListenerObject) {
+    removeEventListener(
+      type: string,
+      listener: EventListenerOrEventListenerObject
+    ) {
       const set = listeners.get(type);
       if (!set) return;
       set.delete(listener);

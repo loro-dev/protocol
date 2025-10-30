@@ -1,24 +1,17 @@
 import { EphemeralStore } from "loro-crdt";
-import { CrdtType, JoinResponseOk, UpdateError } from "loro-protocol";
+import { CrdtType, JoinResponseOk } from "loro-protocol";
 import type { CrdtAdaptorContext, CrdtDocAdaptor } from "./types";
-
-export interface LoroEphemeralAdaptorConfig {
-  timeout?: number;
-  onUpdateError?: (error: UpdateError) => void;
-}
 
 export class LoroEphemeralAdaptor implements CrdtDocAdaptor {
   readonly crdtType = CrdtType.LoroEphemeralStore;
 
   private store: EphemeralStore;
-  private config: LoroEphemeralAdaptorConfig;
   private ctx?: CrdtAdaptorContext;
   private localUpdateUnsubscribe?: () => void;
   private destroyed = false;
 
-  constructor(store?: EphemeralStore, config: LoroEphemeralAdaptorConfig = {}) {
-    this.store = store || new EphemeralStore(config.timeout);
-    this.config = config;
+  constructor(store?: EphemeralStore) {
+    this.store = store || new EphemeralStore();
   }
 
   waitForReachingServerVersion(): Promise<void> {
@@ -69,15 +62,12 @@ export class LoroEphemeralAdaptor implements CrdtDocAdaptor {
         try {
           this.store.apply(update);
         } catch (error) {
-          this.ctx?.onImportError(error instanceof Error ? error : new Error(String(error)), [update]);
+          this.ctx?.onImportError(
+            error instanceof Error ? error : new Error(String(error)),
+            [update]
+          );
         }
       }
-    }
-  }
-
-  handleUpdateError(error: UpdateError): void {
-    if (this.config.onUpdateError) {
-      this.config.onUpdateError(error);
     }
   }
 
@@ -94,15 +84,3 @@ export class LoroEphemeralAdaptor implements CrdtDocAdaptor {
     this.ctx = undefined;
   }
 }
-
-export function createLoroEphemeralAdaptor(config: LoroEphemeralAdaptorConfig = {}): LoroEphemeralAdaptor {
-  return new LoroEphemeralAdaptor(new EphemeralStore(config.timeout), config);
-}
-
-export function createLoroEphemeralAdaptorFromStore(
-  store: EphemeralStore,
-  config: LoroEphemeralAdaptorConfig = {}
-): LoroEphemeralAdaptor {
-  return new LoroEphemeralAdaptor(store, config);
-}
-
