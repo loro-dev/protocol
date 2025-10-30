@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.2](https://github.com/loro-dev/protocol/compare/loro-protocol-v0.1.1...loro-protocol-v0.1.2) (2025-10-30)
+
+
+### Features
+
+* integrate Flock support into Loro adaptors ([fc7d5c6](https://github.com/loro-dev/protocol/commit/fc7d5c6f0df26d1b7699b9f6e7f25addb648628a))
+
 ## [0.1.1](https://github.com/loro-dev/protocol/compare/loro-protocol-v0.1.0...loro-protocol-v0.1.1) (2025-10-23)
 
 

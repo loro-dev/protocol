@@ -1,5 +1,29 @@
 # Changelog
 
+## [0.2.0](https://github.com/loro-dev/protocol/compare/loro-websocket-v0.1.6...loro-websocket-v0.2.0) (2025-10-30)
+
+
+### ⚠ BREAKING CHANGES
+
+* simplify API
+
+### Features
+
+* integrate Flock support into Loro adaptors ([fc7d5c6](https://github.com/loro-dev/protocol/commit/fc7d5c6f0df26d1b7699b9f6e7f25addb648628a))
+
+
+### Code Refactoring
+
+* simplify API ([c0389a5](https://github.com/loro-dev/protocol/commit/c0389a5821e31b6dc89b8c755e319f8e70658641))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * loro-protocol bumped to 0.1.2
+    * loro-adaptors bumped to 0.2.0
+
 ## [0.1.6](https://github.com/loro-dev/protocol/compare/loro-websocket-v0.1.5...loro-websocket-v0.1.6) (2025-10-23)
 
 

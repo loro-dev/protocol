@@ -1,6 +1,6 @@
 {
   "name": "loro-protocol",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "private": false,
   "description": "Compact binary wire protocol for collaborative CRDTs (Loro/Yjs), with encoders/decoders and bytes utilities",
   "author": "Loro Team",
