@@ -149,8 +149,7 @@ class LoroPersistentStoreCrdtDoc implements CrdtDoc {
     return true;
   }
   exportSnapshot(): Uint8Array | null {
-    const data = this.store.encodeAll();
-    return data.length ? data : null;
+    return this.store.encodeAll();
   }
   importSnapshot(data: Uint8Array): void {
     if (data.length) {
