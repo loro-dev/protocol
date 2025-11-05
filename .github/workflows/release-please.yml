@@ -45,9 +45,9 @@ jobs:
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
-          registry-url: 'https://registry.npmjs.org'
-          cache: 'pnpm'
+          node-version: "24"
+          registry-url: "https://registry.npmjs.org"
+          cache: "pnpm"
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
@@ -85,4 +85,3 @@ jobs:
           # Publish only the unpublished ones in topo order
           echo "Publishing: $filters"
           pnpm -r $filters publish --access public --no-git-checks
-
