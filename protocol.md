@@ -21,6 +21,7 @@ Exception: the protocol also defines two out‑of‑band keepalive frames, "ping
 - The first 4 bytes are magic bytes that indicate the CRDT type:
   - "%LOR": Loro Document
   - "%EPH": [Loro Ephemeral Store](https://loro.dev/docs/api/js#ephemeralstore)
+  - "%EPS": Persisted Loro Ephemeral Store (marks data that should be stored server-side so new peers can hydrate immediately)
   - "%YJS": Yjs
   - "%YAW": Yjs Awareness
   - "%FLO": Flock Document
@@ -30,6 +31,10 @@ Exception: the protocol also defines two out‑of‑band keepalive frames, "ping
 - Followed by a byte for the message type.
 - Payload, which depends on the message type.
 - Message size should not exceed 256 KB.
+
+Implementations use `%EPS` when the ephemeral payloads must survive beyond a single client session. Tagging frames with this CRDT
+type tells the server to persist the latest store so that future peers can immediately download the full state instead of waiting
+for another client to resend their presence data.
 
 Note: Keepalive frames are special and bypass this envelope entirely. When the entire frame payload is exactly the text string "ping" or "pong" (WebSocket text frames), it MUST be treated as a keepalive and NOT parsed using the fields above. See Keepalive: Ping/Pong.
 

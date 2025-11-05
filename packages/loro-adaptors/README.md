@@ -14,6 +14,7 @@ The websocket client (`loro-websocket`) speaks the binary wire protocol. These a
 
 - `LoroAdaptor`: wraps a `LoroDoc` and streams local updates to the connection; applies remote updates on receipt
 - `LoroEphemeralAdaptor`: wraps an `EphemeralStore` for transient presence/cursor data
+- `LoroPersistentStoreAdaptor`: wraps an `EphemeralStore` but marks updates as persisted so the server stores them for new peers
 - `EloLoroAdaptor`: wraps a `LoroDoc` and packages updates into %ELO containers with AES‑GCM; decrypts inbound containers and imports plaintext.
 
 ## Usage
@@ -23,6 +24,7 @@ import { LoroWebsocketClient } from "loro-websocket";
 import {
   LoroAdaptor,
   LoroEphemeralAdaptor,
+  LoroPersistentStoreAdaptor,
   EloLoroAdaptor,
 } from "loro-adaptors";
 import { LoroDoc, EphemeralStore } from "loro-crdt";
@@ -41,6 +43,14 @@ const eph = new EphemeralStore(30_000);
 const ephAdaptor = new LoroEphemeralAdaptor(eph);
 const roomEph = await client.join({ roomId: "demo", crdtAdaptor: ephAdaptor });
 
+// Persisted presence that should be available to late joiners
+const persistedStore = new EphemeralStore(30_000);
+const persistedAdaptor = new LoroPersistentStoreAdaptor(persistedStore);
+const roomPersisted = await client.join({
+  roomId: "demo-persisted",
+  crdtAdaptor: persistedAdaptor,
+});
+
 // %ELO (end‑to‑end encrypted Loro)
 const key = new Uint8Array(32);
 const elo = new EloLoroAdaptor({
@@ -55,6 +65,7 @@ doc.commit();
 // Cleanup
 await roomEph.destroy();
 await roomDoc.destroy();
+await roomPersisted.destroy();
 await secure.destroy();
 ```
 
@@ -62,6 +73,7 @@ await secure.destroy();
 
 - `new LoroAdaptor(doc?: LoroDoc, config?: { onImportError?, onUpdateError? })`
 - `new LoroEphemeralAdaptor(store?: EphemeralStore)`
+- `new LoroPersistentStoreAdaptor(store?: EphemeralStore)`
 - `new EloLoroAdaptor(docOrConfig: LoroDoc | { getPrivateKey, ivFactory?, onDecryptError?, onUpdateError? })`
   - `getPrivateKey: (keyId?) => Promise<{ keyId: string, key: CryptoKey | Uint8Array }>`
   - Optional `ivFactory()` for testing (12‑byte IV)

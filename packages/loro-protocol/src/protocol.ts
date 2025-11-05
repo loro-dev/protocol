@@ -5,6 +5,7 @@ export const MAX_MESSAGE_SIZE = 256 * 1024;
 export const CrdtType = {
   Loro: "%LOR",
   LoroEphemeralStore: "%EPH",
+  LoroEphemeralStorePersisted: "%EPS",
   Yjs: "%YJS",
   YjsAwareness: "%YAW",
   Elo: "%ELO",
@@ -13,6 +14,7 @@ export const CrdtType = {
 export const CrdtTypeId = {
   Loro: "loro",
   LoroEphemeralStore: "eph",
+  LoroEphemeralStorePersisted: "eps",
   Yjs: "yjs",
   YjsAwareness: "yaw",
   Elo: "elo",
@@ -23,6 +25,7 @@ export type CrdtId = (typeof CrdtTypeId)[keyof typeof CrdtTypeId];
 export const MagicBytesToCrdtId = {
   "%LOR": "loro",
   "%EPH": "eph",
+  "%EPS": "eps",
   "%YJS": "yjs",
   "%YAW": "yaw",
   "%ELO": "elo",

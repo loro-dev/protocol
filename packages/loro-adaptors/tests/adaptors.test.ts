@@ -1,6 +1,10 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import { LoroDoc, EphemeralStore, VersionVector } from "loro-crdt";
-import { LoroAdaptor, LoroEphemeralAdaptor } from "../src/adaptors";
+import {
+  LoroAdaptor,
+  LoroEphemeralAdaptor,
+  LoroPersistentStoreAdaptor,
+} from "../src/adaptors";
 import { CrdtType, JoinResponseOk, MessageType } from "loro-protocol";
 
 describe("LoroAdaptor", () => {
@@ -122,6 +126,46 @@ describe("LoroEphemeralAdaptor", () => {
     adaptor.applyUpdate([update]);
 
     expect(store.get("cursor")).toEqual({ x: 100, y: 200 });
+  });
+});
+
+describe("LoroPersistentStoreAdaptor", () => {
+  let adaptor: LoroPersistentStoreAdaptor;
+  let store: EphemeralStore;
+
+  beforeEach(() => {
+    store = new EphemeralStore();
+    adaptor = new LoroPersistentStoreAdaptor(store);
+  });
+
+  it("should have correct CRDT type", () => {
+    expect(adaptor.crdtType).toBe(CrdtType.LoroEphemeralStorePersisted);
+  });
+
+  it("should return the underlying EphemeralStore", () => {
+    expect(adaptor.getStore()).toBe(store);
+  });
+
+  it("should send full state on join", async () => {
+    const mockSend = vi.fn();
+    adaptor.setCtx({
+      send: mockSend,
+      onJoinFailed: vi.fn(),
+      onImportError: vi.fn(),
+    });
+
+    store.set("cursor", { x: 1 });
+    const joinOk: JoinResponseOk = {
+      type: MessageType.JoinResponseOk,
+      crdt: CrdtType.LoroEphemeralStorePersisted,
+      roomId: "room",
+      permission: "write",
+      version: new Uint8Array(),
+    };
+
+    await adaptor.handleJoinOk(joinOk);
+
+    expect(mockSend).toHaveBeenCalledWith([expect.any(Uint8Array)]);
   });
 });
 

@@ -157,7 +157,7 @@ The Rust workspace contains a minimal async WebSocket server (`loro-websocket-se
 
 ## Protocol Highlights
 
-- Magic bytes per CRDT: "%LOR" (Loro doc), "%EPH" (Loro ephemeral), "%YJS", "%YAW", …
+- Magic bytes per CRDT: "%LOR" (Loro doc), "%EPH" (Loro ephemeral), "%EPS" (persisted Loro ephemeral – tells the server to keep the latest state so new peers can load it immediately), "%YJS", "%YAW", …
 - Messages: JoinRequest/JoinResponseOk/JoinError, DocUpdate, DocUpdateFragmentHeader/Fragment, UpdateError, Leave
 - Limits: 256 KiB per message; large updates must be fragmented; default reassembly timeout 10s
 - Multi‑room: room ID is part of every message; one connection can join multiple rooms

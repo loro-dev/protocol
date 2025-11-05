@@ -22,6 +22,7 @@ import {
 const validCrdtTypes = [
   CrdtType.Loro,
   CrdtType.LoroEphemeralStore,
+  CrdtType.LoroEphemeralStorePersisted,
   CrdtType.Yjs,
   CrdtType.YjsAwareness,
   CrdtType.Elo,
@@ -35,6 +36,7 @@ function isCrdtType(x: unknown): x is CrdtType {
     typeof x === "string" &&
     (x === CrdtType.Loro ||
       x === CrdtType.LoroEphemeralStore ||
+      x === CrdtType.LoroEphemeralStorePersisted ||
       x === CrdtType.Yjs ||
       x === CrdtType.YjsAwareness ||
       x === CrdtType.Flock ||
