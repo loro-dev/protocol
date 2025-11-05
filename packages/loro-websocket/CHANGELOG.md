@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.2.1](https://github.com/loro-dev/protocol/compare/loro-websocket-v0.2.0...loro-websocket-v0.2.1) (2025-11-05)
+
+
+### Features
+
+* Add persistent EphemeralStore adaptors ([#18](https://github.com/loro-dev/protocol/issues/18)) ([db6bfab](https://github.com/loro-dev/protocol/commit/db6bfab148ac2a513387bc7bc1b293a36ddb257f))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * loro-protocol bumped to 0.1.3
+    * loro-adaptors bumped to 0.2.1
+
 ## [0.2.0](https://github.com/loro-dev/protocol/compare/loro-websocket-v0.1.6...loro-websocket-v0.2.0) (2025-10-30)
 
 
