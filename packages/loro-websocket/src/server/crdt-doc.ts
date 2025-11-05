@@ -158,7 +158,9 @@ class LoroPersistentStoreCrdtDoc implements CrdtDoc {
     }
   }
   allowBackfillWhenNoOtherClients(): boolean {
-    return false;
+    // Allow a single reconnecting client to hydrate from the persisted snapshot
+    // even if no other peers are currently connected to the room.
+    return true;
   }
 }
 
