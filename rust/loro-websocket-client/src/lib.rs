@@ -421,9 +421,10 @@ impl Hash for RoomKey {
         let tag = match self.crdt {
             CrdtType::Loro => 0u8,
             CrdtType::LoroEphemeralStore => 1,
-            CrdtType::Yjs => 2,
-            CrdtType::YjsAwareness => 3,
-            CrdtType::Elo => 4,
+            CrdtType::LoroEphemeralStorePersisted => 2,
+            CrdtType::Yjs => 3,
+            CrdtType::YjsAwareness => 4,
+            CrdtType::Elo => 5,
         };
         tag.hash(state);
         self.room.hash(state);

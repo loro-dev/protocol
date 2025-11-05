@@ -8,8 +8,8 @@
 //! - Uses a single-thread Tokio runtime to match crate features.
 //! - Defaults to 127.0.0.1:9000 and ./loro.db if not specified.
 
-use std::{error::Error, path::PathBuf};
 use clap::Parser;
+use std::{error::Error, path::PathBuf};
 use tracing::{debug, error, info, warn};
 use tracing_subscriber::EnvFilter;
 
@@ -18,18 +18,37 @@ use loro_websocket_server::{serve_incoming_with_config, ServerConfig};
 use tokio::net::TcpListener;
 
 #[derive(Parser, Debug)]
-#[command(name = "simple-server", about = "Loro WebSocket server with SQLite persistence")]
+#[command(
+    name = "simple-server",
+    about = "Loro WebSocket server with SQLite persistence"
+)]
 struct Args {
     #[arg(short = 'a', long, value_name = "ADDR", conflicts_with_all = ["host", "port"], help = "Full socket address to bind, e.g. 0.0.0.0:9000")]
     addr: Option<String>,
 
-    #[arg(short = 'H', long, default_value = "127.0.0.1", help = "Host to bind when --addr not provided")]
+    #[arg(
+        short = 'H',
+        long,
+        default_value = "127.0.0.1",
+        help = "Host to bind when --addr not provided"
+    )]
     host: String,
 
-    #[arg(short = 'p', long, default_value_t = 9000, help = "Port to bind when --addr not provided")]
+    #[arg(
+        short = 'p',
+        long,
+        default_value_t = 9000,
+        help = "Port to bind when --addr not provided"
+    )]
     port: u16,
 
-    #[arg(short = 'd', long = "db", value_name = "PATH", default_value = "loro.db", help = "SQLite database path")]
+    #[arg(
+        short = 'd',
+        long = "db",
+        value_name = "PATH",
+        default_value = "loro.db",
+        help = "SQLite database path"
+    )]
     db: PathBuf,
 }
 
@@ -44,14 +63,18 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
         .init();
 
     let args = Args::parse();
-    let addr = args.addr.unwrap_or_else(|| format!("{}:{}", args.host, args.port));
+    let addr = args
+        .addr
+        .unwrap_or_else(|| format!("{}:{}", args.host, args.port));
     let db_path = args.db;
 
     init_db(&db_path).await?;
 
     // Wire persistence hooks
     let db_for_load = db_path.clone();
-    type LoadFut = std::pin::Pin<Box<dyn std::future::Future<Output = Result<Option<Vec<u8>>, String>> + Send>>;
+    type LoadFut = std::pin::Pin<
+        Box<dyn std::future::Future<Output = Result<Option<Vec<u8>>, String>> + Send>,
+    >;
     type SaveFut = std::pin::Pin<Box<dyn std::future::Future<Output = Result<(), String>> + Send>>;
 
     let on_load = std::sync::Arc::new(move |workspace: String, room: String, crdt: CrdtType| {
@@ -66,16 +89,20 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
     });
 
     let db_for_save = db_path.clone();
-    let on_save = std::sync::Arc::new(move |workspace: String, room: String, crdt: CrdtType, data: Vec<u8>| {
-        let db_path = db_for_save.clone();
-        let fut = async move {
-            tokio::task::spawn_blocking(move || save_snapshot(&db_path, &workspace, &room, crdt, &data))
+    let on_save = std::sync::Arc::new(
+        move |workspace: String, room: String, crdt: CrdtType, data: Vec<u8>| {
+            let db_path = db_for_save.clone();
+            let fut = async move {
+                tokio::task::spawn_blocking(move || {
+                    save_snapshot(&db_path, &workspace, &room, crdt, &data)
+                })
                 .await
                 .map_err(|e| format!("task join error: {e}"))?
-        };
-        let fut: SaveFut = Box::pin(fut);
-        fut
-    });
+            };
+            let fut: SaveFut = Box::pin(fut);
+            fut
+        },
+    );
 
     let cfg = ServerConfig {
         on_load_document: Some(on_load),
@@ -123,13 +150,19 @@ fn crdt_to_str(crdt: CrdtType) -> &'static str {
     match crdt {
         CrdtType::Loro => "loro",
         CrdtType::LoroEphemeralStore => "loro_ephemeral",
+        CrdtType::LoroEphemeralStorePersisted => "loro_ephemeral_persisted",
         CrdtType::Yjs => "yjs",
         CrdtType::YjsAwareness => "yjs_awareness",
         CrdtType::Elo => "elo",
     }
 }
 
-fn load_snapshot(path: &PathBuf, workspace: &str, room: &str, crdt: CrdtType) -> Result<Option<Vec<u8>>, String> {
+fn load_snapshot(
+    path: &PathBuf,
+    workspace: &str,
+    room: &str,
+    crdt: CrdtType,
+) -> Result<Option<Vec<u8>>, String> {
     let conn = rusqlite::Connection::open(path).map_err(|e| e.to_string())?;
     let mut stmt = conn
         .prepare("SELECT data FROM documents WHERE workspace=?1 AND crdt=?2 AND room=?3")
@@ -145,7 +178,13 @@ fn load_snapshot(path: &PathBuf, workspace: &str, room: &str, crdt: CrdtType) ->
     }
 }
 
-fn save_snapshot(path: &PathBuf, workspace: &str, room: &str, crdt: CrdtType, data: &[u8]) -> Result<(), String> {
+fn save_snapshot(
+    path: &PathBuf,
+    workspace: &str,
+    room: &str,
+    crdt: CrdtType,
+    data: &[u8],
+) -> Result<(), String> {
     let conn = rusqlite::Connection::open(path).map_err(|e| e.to_string())?;
     let now_ms = chrono_like_now_ms();
     conn.execute(

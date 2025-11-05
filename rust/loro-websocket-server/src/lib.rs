@@ -61,9 +61,10 @@ impl Hash for RoomKey {
         let tag = match self.crdt {
             CrdtType::Loro => 0u8,
             CrdtType::LoroEphemeralStore => 1,
-            CrdtType::Yjs => 2,
-            CrdtType::YjsAwareness => 3,
-            CrdtType::Elo => 4,
+            CrdtType::LoroEphemeralStorePersisted => 2,
+            CrdtType::Yjs => 3,
+            CrdtType::YjsAwareness => 4,
+            CrdtType::Elo => 5,
         };
         tag.hash(state);
         self.room.hash(state);
@@ -104,44 +105,134 @@ pub struct ServerConfig {
 
 // CRDT document abstraction to reduce match-based branching
 trait CrdtDoc: Send {
-    fn get_version(&self) -> Vec<u8> { Vec::new() }
-    fn compute_backfill(&self, _client_version: &[u8]) -> Vec<Vec<u8>> { Vec::new() }
-    fn apply_updates(&mut self, _updates: &[Vec<u8>]) -> Result<(), String> { Ok(()) }
-    fn should_persist(&self) -> bool { false }
-    fn export_snapshot(&self) -> Option<Vec<u8>> { None }
+    fn get_version(&self) -> Vec<u8> {
+        Vec::new()
+    }
+    fn compute_backfill(&self, _client_version: &[u8]) -> Vec<Vec<u8>> {
+        Vec::new()
+    }
+    fn apply_updates(&mut self, _updates: &[Vec<u8>]) -> Result<(), String> {
+        Ok(())
+    }
+    fn should_persist(&self) -> bool {
+        false
+    }
+    fn export_snapshot(&self) -> Option<Vec<u8>> {
+        None
+    }
     fn import_snapshot(&mut self, _data: &[u8]) {}
-    fn allow_backfill_when_no_other_clients(&self) -> bool { false }
-    fn remove_when_last_subscriber_leaves(&self) -> bool { false }
+    fn allow_backfill_when_no_other_clients(&self) -> bool {
+        false
+    }
+    fn remove_when_last_subscriber_leaves(&self) -> bool {
+        false
+    }
 }
 
-struct LoroRoomDoc { doc: LoroDoc }
+struct LoroRoomDoc {
+    doc: LoroDoc,
+}
 impl LoroRoomDoc {
-    fn new() -> Self { Self { doc: LoroDoc::new() } }
+    fn new() -> Self {
+        Self {
+            doc: LoroDoc::new(),
+        }
+    }
 }
 impl CrdtDoc for LoroRoomDoc {
     fn apply_updates(&mut self, updates: &[Vec<u8>]) -> Result<(), String> {
-        for u in updates { let _ = self.doc.import(u); }
+        for u in updates {
+            let _ = self.doc.import(u);
+        }
         Ok(())
     }
-    fn should_persist(&self) -> bool { true }
-    fn export_snapshot(&self) -> Option<Vec<u8>> { self.doc.export(ExportMode::Snapshot).ok() }
-    fn import_snapshot(&mut self, data: &[u8]) { let _ = self.doc.import(data); }
+    fn should_persist(&self) -> bool {
+        true
+    }
+    fn export_snapshot(&self) -> Option<Vec<u8>> {
+        self.doc.export(ExportMode::Snapshot).ok()
+    }
+    fn import_snapshot(&mut self, data: &[u8]) {
+        let _ = self.doc.import(data);
+    }
 }
 
-struct EphemeralRoomDoc { store: EphemeralStore }
+struct EphemeralRoomDoc {
+    store: EphemeralStore,
+}
 impl EphemeralRoomDoc {
-    fn new(timeout_ms: i64) -> Self { Self { store: EphemeralStore::new(timeout_ms) } }
+    fn new(timeout_ms: i64) -> Self {
+        Self {
+            store: EphemeralStore::new(timeout_ms),
+        }
+    }
 }
 impl CrdtDoc for EphemeralRoomDoc {
     fn compute_backfill(&self, _client_version: &[u8]) -> Vec<Vec<u8>> {
         let data = self.store.encode_all();
-        if data.is_empty() { Vec::new() } else { vec![data] }
+        if data.is_empty() {
+            Vec::new()
+        } else {
+            vec![data]
+        }
     }
     fn apply_updates(&mut self, updates: &[Vec<u8>]) -> Result<(), String> {
-        for u in updates { if !u.is_empty() { self.store.apply(u); } }
+        for u in updates {
+            if !u.is_empty() {
+                self.store.apply(u);
+            }
+        }
         Ok(())
     }
-    fn remove_when_last_subscriber_leaves(&self) -> bool { true }
+    fn remove_when_last_subscriber_leaves(&self) -> bool {
+        true
+    }
+}
+
+struct PersistentEphemeralRoomDoc {
+    store: EphemeralStore,
+    timeout_ms: i64,
+}
+impl PersistentEphemeralRoomDoc {
+    fn new(timeout_ms: i64) -> Self {
+        Self {
+            store: EphemeralStore::new(timeout_ms),
+            timeout_ms,
+        }
+    }
+}
+impl CrdtDoc for PersistentEphemeralRoomDoc {
+    fn compute_backfill(&self, _client_version: &[u8]) -> Vec<Vec<u8>> {
+        let data = self.store.encode_all();
+        if data.is_empty() {
+            Vec::new()
+        } else {
+            vec![data]
+        }
+    }
+    fn apply_updates(&mut self, updates: &[Vec<u8>]) -> Result<(), String> {
+        for u in updates {
+            if !u.is_empty() {
+                self.store.apply(u);
+            }
+        }
+        Ok(())
+    }
+    fn should_persist(&self) -> bool {
+        true
+    }
+    fn export_snapshot(&self) -> Option<Vec<u8>> {
+        Some(self.store.encode_all())
+    }
+    fn import_snapshot(&mut self, data: &[u8]) {
+        self.store = EphemeralStore::new(self.timeout_ms);
+        if !data.is_empty() {
+            self.store.apply(data);
+        }
+    }
+    fn allow_backfill_when_no_other_clients(&self) -> bool {
+        true
+    }
 }
 
 // ELO header index entries
@@ -156,7 +247,11 @@ struct EloRoomDoc {
     spans_by_peer: std::collections::HashMap<String, Vec<EloDeltaSpanIndexEntry>>,
 }
 impl EloRoomDoc {
-    fn new() -> Self { Self { spans_by_peer: std::collections::HashMap::new() } }
+    fn new() -> Self {
+        Self {
+            spans_by_peer: std::collections::HashMap::new(),
+        }
+    }
 
     fn peer_key_from_bytes(bytes: &[u8]) -> String {
         // Prefer UTF-8 if valid, else hex
@@ -164,7 +259,10 @@ impl EloRoomDoc {
             Ok(s) => s.to_string(),
             Err(_) => {
                 let mut out = String::with_capacity(bytes.len() * 2);
-                for b in bytes { use std::fmt::Write as _; let _ = write!(&mut out, "{:02x}", b); }
+                for b in bytes {
+                    use std::fmt::Write as _;
+                    let _ = write!(&mut out, "{:02x}", b);
+                }
                 out
             }
         }
@@ -174,7 +272,8 @@ impl EloRoomDoc {
         use loro_protocol::bytes::BytesReader;
         let mut r = BytesReader::new(buf);
         let count = usize::try_from(r.read_uleb128().ok()?).ok()?;
-        let mut map: std::collections::HashMap<String, u64> = std::collections::HashMap::with_capacity(count);
+        let mut map: std::collections::HashMap<String, u64> =
+            std::collections::HashMap::with_capacity(count);
         for _ in 0..count {
             let peer_bytes = r.read_var_bytes().ok()?;
             let ctr = r.read_uleb128().ok()?;
@@ -187,10 +286,18 @@ impl EloRoomDoc {
         use loro_protocol::bytes::BytesWriter;
         let mut entries: Vec<(String, u64)> = Vec::new();
         for (peer, spans) in self.spans_by_peer.iter() {
-            if !peer.as_bytes().iter().all(|b| b.is_ascii_digit()) { continue; }
+            if !peer.as_bytes().iter().all(|b| b.is_ascii_digit()) {
+                continue;
+            }
             let mut max_end = 0u64;
-            for s in spans.iter() { if s.end > max_end { max_end = s.end; } }
-            if max_end > 0 { entries.push((peer.clone(), max_end)); }
+            for s in spans.iter() {
+                if s.end > max_end {
+                    max_end = s.end;
+                }
+            }
+            if max_end > 0 {
+                entries.push((peer.clone(), max_end));
+            }
         }
         let mut w = BytesWriter::new();
         w.push_uleb128(entries.len() as u64);
@@ -205,24 +312,38 @@ impl CrdtDoc for EloRoomDoc {
     fn get_version(&self) -> Vec<u8> {
         // If we have no indexed entries yet, return an empty version to signal
         // "unknown/empty" baseline so clients may choose to send a snapshot.
-        if self.spans_by_peer.is_empty() { return Vec::new(); }
+        if self.spans_by_peer.is_empty() {
+            return Vec::new();
+        }
         self.encode_current_vv()
     }
     fn compute_backfill(&self, client_version: &[u8]) -> Vec<Vec<u8>> {
-        let known = self.decode_version_vector(client_version).unwrap_or_default();
+        let known = self
+            .decode_version_vector(client_version)
+            .unwrap_or_default();
         let mut records: Vec<Vec<u8>> = Vec::new();
         for (peer, spans) in self.spans_by_peer.iter() {
             let k = known.get(peer).copied().unwrap_or(0);
-            for e in spans { if e.end > k { records.push(e.record.clone()); } }
+            for e in spans {
+                if e.end > k {
+                    records.push(e.record.clone());
+                }
+            }
         }
-        if records.is_empty() { return Vec::new(); }
+        if records.is_empty() {
+            return Vec::new();
+        }
         let mut w = loro_protocol::bytes::BytesWriter::new();
         w.push_uleb128(records.len() as u64);
-        for rec in records.iter() { w.push_var_bytes(rec); }
+        for rec in records.iter() {
+            w.push_var_bytes(rec);
+        }
         vec![w.finalize()]
     }
     fn apply_updates(&mut self, updates: &[Vec<u8>]) -> Result<(), String> {
-        use loro_protocol::elo::{decode_elo_container, parse_elo_record_header, EloRecordKind, EloHeader};
+        use loro_protocol::elo::{
+            decode_elo_container, parse_elo_record_header, EloHeader, EloRecordKind,
+        };
         for u in updates {
             let records = decode_elo_container(u.as_slice())?;
             for rec in records {
@@ -230,24 +351,46 @@ impl CrdtDoc for EloRoomDoc {
                 match parsed.kind {
                     EloRecordKind::DeltaSpan => {
                         if let EloHeader::Delta(h) = parsed.header {
-                            if !(h.end > h.start) { return Err("invalid ELO delta span: end must be > start".into()); }
-                            if h.iv.len() != 12 { return Err("invalid ELO delta span: IV must be 12 bytes".into()); }
+                            if !(h.end > h.start) {
+                                return Err("invalid ELO delta span: end must be > start".into());
+                            }
+                            if h.iv.len() != 12 {
+                                return Err("invalid ELO delta span: IV must be 12 bytes".into());
+                            }
                             let peer = Self::peer_key_from_bytes(&h.peer_id);
                             let list = self.spans_by_peer.entry(peer).or_default();
                             // Insert keeping order by start; remove fully covered entries [start, end]
-                            let mut kept: Vec<EloDeltaSpanIndexEntry> = Vec::with_capacity(list.len() + 1);
+                            let mut kept: Vec<EloDeltaSpanIndexEntry> =
+                                Vec::with_capacity(list.len() + 1);
                             let mut inserted = false;
                             for e in list.iter() {
                                 if !inserted && e.start >= h.start {
-                                    kept.push(EloDeltaSpanIndexEntry { start: h.start, end: h.end, key_id: h.key_id.clone(), record: rec.to_vec() });
+                                    kept.push(EloDeltaSpanIndexEntry {
+                                        start: h.start,
+                                        end: h.end,
+                                        key_id: h.key_id.clone(),
+                                        record: rec.to_vec(),
+                                    });
                                     inserted = true;
                                 }
                                 // keep entries not fully covered by [start, end]
                                 let covered = e.start >= h.start && e.end <= h.end;
-                                if !covered { kept.push(EloDeltaSpanIndexEntry { start: e.start, end: e.end, key_id: e.key_id.clone(), record: e.record.clone() }); }
+                                if !covered {
+                                    kept.push(EloDeltaSpanIndexEntry {
+                                        start: e.start,
+                                        end: e.end,
+                                        key_id: e.key_id.clone(),
+                                        record: e.record.clone(),
+                                    });
+                                }
                             }
                             if !inserted {
-                                kept.push(EloDeltaSpanIndexEntry { start: h.start, end: h.end, key_id: h.key_id.clone(), record: rec.to_vec() });
+                                kept.push(EloDeltaSpanIndexEntry {
+                                    start: h.start,
+                                    end: h.end,
+                                    key_id: h.key_id.clone(),
+                                    record: rec.to_vec(),
+                                });
                             }
                             *list = kept;
                         }
@@ -260,7 +403,9 @@ impl CrdtDoc for EloRoomDoc {
         }
         Ok(())
     }
-    fn allow_backfill_when_no_other_clients(&self) -> bool { true }
+    fn allow_backfill_when_no_other_clients(&self) -> bool {
+        true
+    }
 }
 impl Default for ServerConfig {
     fn default() -> Self {
@@ -369,7 +514,9 @@ impl Hub {
     }
 
     async fn ensure_room_loaded(&mut self, room: &RoomKey) {
-        if self.docs.contains_key(room) { return; }
+        if self.docs.contains_key(room) {
+            return;
+        }
         match room.crdt {
             CrdtType::Loro => {
                 let mut d = LoroRoomDoc::new();
@@ -377,20 +524,65 @@ impl Hub {
                     let room_str = String::from_utf8_lossy(&room.room).to_string();
                     let ws = self.workspace.clone();
                     match (loader)(ws, room_str, room.crdt).await {
-                        Ok(Some(bytes)) => { d.import_snapshot(&bytes); }
+                        Ok(Some(bytes)) => {
+                            d.import_snapshot(&bytes);
+                        }
                         Ok(None) => {}
-                        Err(e) => { warn!(room=?String::from_utf8_lossy(&room.room), %e, "load document failed"); }
+                        Err(e) => {
+                            warn!(room=?String::from_utf8_lossy(&room.room), %e, "load document failed");
+                        }
                     }
                 }
-                self.docs.insert(room.clone(), RoomDocState { doc: Box::new(d), dirty: false });
+                self.docs.insert(
+                    room.clone(),
+                    RoomDocState {
+                        doc: Box::new(d),
+                        dirty: false,
+                    },
+                );
             }
             CrdtType::LoroEphemeralStore => {
                 let d = EphemeralRoomDoc::new(Self::EPHEMERAL_TIMEOUT_MS);
-                self.docs.insert(room.clone(), RoomDocState { doc: Box::new(d), dirty: false });
+                self.docs.insert(
+                    room.clone(),
+                    RoomDocState {
+                        doc: Box::new(d),
+                        dirty: false,
+                    },
+                );
+            }
+            CrdtType::LoroEphemeralStorePersisted => {
+                let mut d = PersistentEphemeralRoomDoc::new(Self::EPHEMERAL_TIMEOUT_MS);
+                if let Some(loader) = &self.config.on_load_document {
+                    let room_str = String::from_utf8_lossy(&room.room).to_string();
+                    let ws = self.workspace.clone();
+                    match (loader)(ws, room_str, room.crdt).await {
+                        Ok(Some(bytes)) => {
+                            d.import_snapshot(&bytes);
+                        }
+                        Ok(None) => {}
+                        Err(e) => {
+                            warn!(room=?String::from_utf8_lossy(&room.room), %e, "load persisted ephemeral store failed");
+                        }
+                    }
+                }
+                self.docs.insert(
+                    room.clone(),
+                    RoomDocState {
+                        doc: Box::new(d),
+                        dirty: false,
+                    },
+                );
             }
             CrdtType::Elo => {
                 let d = EloRoomDoc::new();
-                self.docs.insert(room.clone(), RoomDocState { doc: Box::new(d), dirty: false });
+                self.docs.insert(
+                    room.clone(),
+                    RoomDocState {
+                        doc: Box::new(d),
+                        dirty: false,
+                    },
+                );
             }
             _ => {}
         }
@@ -414,7 +606,14 @@ impl Hub {
     }
 
     fn snapshot_bytes(&self, room: &RoomKey) -> Option<Vec<u8>> {
-        self.docs.get(room).and_then(|s| s.doc.export_snapshot())
+        let Some(data) = self.docs.get(room).and_then(|s| s.doc.export_snapshot()) else {
+            return None;
+        };
+        if data.is_empty() {
+            None
+        } else {
+            Some(data)
+        }
     }
 }
 
@@ -457,8 +656,13 @@ impl Hub {
     ) -> Option<Vec<u8>> {
         let key = (room.clone(), batch_id);
         if let Some(b) = self.fragments.get_mut(&key) {
-            let idx = match usize::try_from(index) { Ok(i) => i, Err(_) => return None };
-            if idx >= b.chunks.len() { return None; }
+            let idx = match usize::try_from(index) {
+                Ok(i) => i,
+                Err(_) => return None,
+            };
+            if idx >= b.chunks.len() {
+                return None;
+            }
             if b.chunks[idx].is_none() {
                 b.chunks[idx] = Some(fragment);
                 b.received += 1;
@@ -466,7 +670,9 @@ impl Hub {
             if b.received == b.fragment_count {
                 let mut out = Vec::with_capacity(b.total_size as usize);
                 for ch in b.chunks.iter() {
-                    if let Some(bytes) = ch.as_ref() { out.extend_from_slice(bytes); }
+                    if let Some(bytes) = ch.as_ref() {
+                        out.extend_from_slice(bytes);
+                    }
                 }
                 self.fragments.remove(&key);
                 return Some(out);
@@ -519,7 +725,9 @@ impl HubRegistry {
                                 let start = std::time::Instant::now();
                                 if let Some(snapshot) = state.doc.export_snapshot() {
                                     let room_str = String::from_utf8_lossy(&room.room).to_string();
-                                    match (saver)(ws.clone(), room_str.clone(), room.crdt, snapshot).await {
+                                    match (saver)(ws.clone(), room_str.clone(), room.crdt, snapshot)
+                                        .await
+                                    {
                                         Ok(()) => {
                                             state.dirty = false;
                                             let elapsed = start.elapsed();
@@ -756,21 +964,40 @@ async fn handle_conn(
                             // send initial state:
                             // - If snapshot available (Loro), send as a DocUpdate.
                             if let Some(snap) = h.snapshot_bytes(&room) {
-                                let du = ProtocolMessage::DocUpdate { crdt, room_id: room.room.clone(), updates: vec![snap] };
+                                let du = ProtocolMessage::DocUpdate {
+                                    crdt,
+                                    room_id: room.room.clone(),
+                                    updates: vec![snap],
+                                };
                                 if let Ok(bytes) = loro_protocol::encode(&du) {
                                     let _ = tx.send(Message::Binary(bytes.into()));
                                     debug!(room=?String::from_utf8_lossy(&room.room), "sent initial snapshot after join");
                                 }
                             } else {
                                 // Otherwise, attempt backfill if other clients present or the CRDT allows
-                                let others_in_room = h.subs.get(&room).map(|v| v.len()).unwrap_or(0) > 1;
-                                let allow_when_empty = h.docs.get(&room).map(|s| s.doc.allow_backfill_when_no_other_clients()).unwrap_or(false);
+                                let others_in_room =
+                                    h.subs.get(&room).map(|v| v.len()).unwrap_or(0) > 1;
+                                let allow_when_empty = h
+                                    .docs
+                                    .get(&room)
+                                    .map(|s| s.doc.allow_backfill_when_no_other_clients())
+                                    .unwrap_or(false);
                                 if others_in_room || allow_when_empty {
-                                    let backfill = h.docs.get(&room).map(|s| s.doc.compute_backfill(&version)).unwrap_or_default();
+                                    let backfill = h
+                                        .docs
+                                        .get(&room)
+                                        .map(|s| s.doc.compute_backfill(&version))
+                                        .unwrap_or_default();
                                     let backfill_cnt = backfill.len();
                                     for u in backfill {
-                                        let du = ProtocolMessage::DocUpdate { crdt, room_id: room.room.clone(), updates: vec![u] };
-                                        if let Ok(bytes) = loro_protocol::encode(&du) { let _ = tx.send(Message::Binary(bytes.into())); }
+                                        let du = ProtocolMessage::DocUpdate {
+                                            crdt,
+                                            room_id: room.room.clone(),
+                                            updates: vec![u],
+                                        };
+                                        if let Ok(bytes) = loro_protocol::encode(&du) {
+                                            let _ = tx.send(Message::Binary(bytes.into()));
+                                        }
                                     }
                                     if backfill_cnt > 0 {
                                         debug!(room=?String::from_utf8_lossy(&room.room), cnt=%backfill_cnt, "sent backfill after join");
@@ -778,8 +1005,17 @@ async fn handle_conn(
                                 }
                             }
                         }
-                        ProtocolMessage::DocUpdateFragmentHeader { crdt, room_id, batch_id, fragment_count, total_size_bytes } => {
-                            let room = RoomKey { crdt, room: room_id.clone() };
+                        ProtocolMessage::DocUpdateFragmentHeader {
+                            crdt,
+                            room_id,
+                            batch_id,
+                            fragment_count,
+                            total_size_bytes,
+                        } => {
+                            let room = RoomKey {
+                                crdt,
+                                room: room_id.clone(),
+                            };
                             if !joined_rooms.contains(&room) {
                                 let err = ProtocolMessage::UpdateError {
                                     crdt,
@@ -789,11 +1025,18 @@ async fn handle_conn(
                                     batch_id: Some(batch_id),
                                     app_code: None,
                                 };
-                                if let Ok(bytes) = loro_protocol::encode(&err) { let _ = tx.send(Message::Binary(bytes.into())); }
+                                if let Ok(bytes) = loro_protocol::encode(&err) {
+                                    let _ = tx.send(Message::Binary(bytes.into()));
+                                }
                                 continue;
                             }
                             // Permission check
-                            let perm = hub.lock().await.perms.get(&(conn_id, room.clone())).copied();
+                            let perm = hub
+                                .lock()
+                                .await
+                                .perms
+                                .get(&(conn_id, room.clone()))
+                                .copied();
                             if !matches!(perm, Some(Permission::Write)) {
                                 let err = ProtocolMessage::UpdateError {
                                     crdt,
@@ -803,11 +1046,16 @@ async fn handle_conn(
                                     batch_id: Some(batch_id),
                                     app_code: None,
                                 };
-                                if let Ok(bytes) = loro_protocol::encode(&err) { let _ = tx.send(Message::Binary(bytes.into())); }
+                                if let Ok(bytes) = loro_protocol::encode(&err) {
+                                    let _ = tx.send(Message::Binary(bytes.into()));
+                                }
                                 continue;
                             }
                             // Bounds checks
-                            if fragment_count == 0 || fragment_count > MAX_FRAGMENTS || total_size_bytes > MAX_BATCH_BYTES {
+                            if fragment_count == 0
+                                || fragment_count > MAX_FRAGMENTS
+                                || total_size_bytes > MAX_BATCH_BYTES
+                            {
                                 let err = ProtocolMessage::UpdateError {
                                     crdt,
                                     room_id: room.room.clone(),
@@ -816,7 +1064,9 @@ async fn handle_conn(
                                     batch_id: Some(batch_id),
                                     app_code: None,
                                 };
-                                if let Ok(bytes) = loro_protocol::encode(&err) { let _ = tx.send(Message::Binary(bytes.into())); }
+                                if let Ok(bytes) = loro_protocol::encode(&err) {
+                                    let _ = tx.send(Message::Binary(bytes.into()));
+                                }
                                 continue;
                             }
                             // Initialize batch (guard against hijack by another sender)
@@ -832,18 +1082,35 @@ async fn handle_conn(
                                         batch_id: Some(batch_id),
                                         app_code: None,
                                     };
-                                    if let Ok(bytes) = loro_protocol::encode(&err) { let _ = tx.send(Message::Binary(bytes.into())); }
+                                    if let Ok(bytes) = loro_protocol::encode(&err) {
+                                        let _ = tx.send(Message::Binary(bytes.into()));
+                                    }
                                     continue;
                                 }
                                 // else: duplicate header from same sender -> accept and broadcast as-is
                             } else {
-                                h.start_fragment_batch(&room, conn_id, batch_id, fragment_count, total_size_bytes);
+                                h.start_fragment_batch(
+                                    &room,
+                                    conn_id,
+                                    batch_id,
+                                    fragment_count,
+                                    total_size_bytes,
+                                );
                             }
                             // Broadcast header as-is
                             h.broadcast(&room, conn_id, Message::Binary(data));
                         }
-                        ProtocolMessage::DocUpdateFragment { crdt, room_id, batch_id, index, fragment } => {
-                            let room = RoomKey { crdt, room: room_id.clone() };
+                        ProtocolMessage::DocUpdateFragment {
+                            crdt,
+                            room_id,
+                            batch_id,
+                            index,
+                            fragment,
+                        } => {
+                            let room = RoomKey {
+                                crdt,
+                                room: room_id.clone(),
+                            };
                             if !joined_rooms.contains(&room) {
                                 let err = ProtocolMessage::UpdateError {
                                     crdt,
@@ -853,7 +1120,9 @@ async fn handle_conn(
                                     batch_id: Some(batch_id),
                                     app_code: None,
                                 };
-                                if let Ok(bytes) = loro_protocol::encode(&err) { let _ = tx.send(Message::Binary(bytes.into())); }
+                                if let Ok(bytes) = loro_protocol::encode(&err) {
+                                    let _ = tx.send(Message::Binary(bytes.into()));
+                                }
                                 continue;
                             }
                             // Validate batch existence and sender binding; also index bounds
@@ -869,11 +1138,17 @@ async fn handle_conn(
                                         batch_id: Some(batch_id),
                                         app_code: None,
                                     };
-                                    if let Ok(bytes) = loro_protocol::encode(&err) { let _ = tx.send(Message::Binary(bytes.into())); }
+                                    if let Ok(bytes) = loro_protocol::encode(&err) {
+                                        let _ = tx.send(Message::Binary(bytes.into()));
+                                    }
                                     // do not broadcast
                                     continue;
                                 }
-                                if !usize::try_from(index).ok().map(|i| i < b.chunks.len()).unwrap_or(false) {
+                                if !usize::try_from(index)
+                                    .ok()
+                                    .map(|i| i < b.chunks.len())
+                                    .unwrap_or(false)
+                                {
                                     let err = ProtocolMessage::UpdateError {
                                         crdt,
                                         room_id: room.room.clone(),
@@ -882,7 +1157,9 @@ async fn handle_conn(
                                         batch_id: Some(batch_id),
                                         app_code: None,
                                     };
-                                    if let Ok(bytes) = loro_protocol::encode(&err) { let _ = tx.send(Message::Binary(bytes.into())); }
+                                    if let Ok(bytes) = loro_protocol::encode(&err) {
+                                        let _ = tx.send(Message::Binary(bytes.into()));
+                                    }
                                     continue;
                                 }
                             } else {
@@ -894,16 +1171,22 @@ async fn handle_conn(
                                     batch_id: Some(batch_id),
                                     app_code: None,
                                 };
-                                if let Ok(bytes) = loro_protocol::encode(&err) { let _ = tx.send(Message::Binary(bytes.into())); }
+                                if let Ok(bytes) = loro_protocol::encode(&err) {
+                                    let _ = tx.send(Message::Binary(bytes.into()));
+                                }
                                 continue;
                             }
                             // Broadcast this fragment as-is to others (only after validation)
                             h.broadcast(&room, conn_id, Message::Binary(data.clone()));
                             // Accumulate and possibly finish
-                            if let Some(buf) = h.add_fragment_and_maybe_finish(&room, batch_id, index, fragment) {
+                            if let Some(buf) =
+                                h.add_fragment_and_maybe_finish(&room, batch_id, index, fragment)
+                            {
                                 // On completion: parse and apply to stored doc state if applicable
                                 match crdt {
-                                    CrdtType::Loro | CrdtType::LoroEphemeralStore => {
+                                    CrdtType::Loro
+                                    | CrdtType::LoroEphemeralStore
+                                    | CrdtType::LoroEphemeralStorePersisted => {
                                         if let Ok(updates) = parse_docupdate_payload(&buf) {
                                             let start = std::time::Instant::now();
                                             h.apply_updates(&room, &updates);
@@ -967,7 +1250,9 @@ async fn handle_conn(
                                 }
                                 let mut h = hub.lock().await;
                                 match crdt {
-                                    CrdtType::Loro | CrdtType::LoroEphemeralStore => {
+                                    CrdtType::Loro
+                                    | CrdtType::LoroEphemeralStore
+                                    | CrdtType::LoroEphemeralStorePersisted => {
                                         let start = std::time::Instant::now();
                                         h.apply_updates(&room, &updates);
                                         let elapsed_ms = start.elapsed().as_millis();
@@ -1032,6 +1317,8 @@ fn parse_docupdate_payload(buf: &[u8]) -> Result<Vec<Vec<u8>>, String> {
         let b = r.read_var_bytes()?.to_vec();
         out.push(b);
     }
-    if r.remaining() != 0 { return Err("trailing bytes".into()); }
+    if r.remaining() != 0 {
+        return Err("trailing bytes".into());
+    }
     Ok(out)
 }

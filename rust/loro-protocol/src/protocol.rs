@@ -14,6 +14,8 @@ pub enum CrdtType {
     Loro,
     /// "%EPH"
     LoroEphemeralStore,
+    /// "%EPS"
+    LoroEphemeralStorePersisted,
     /// "%YJS"
     Yjs,
     /// "%YAW"
@@ -27,6 +29,7 @@ impl CrdtType {
         match self {
             CrdtType::Loro => *b"%LOR",
             CrdtType::LoroEphemeralStore => *b"%EPH",
+            CrdtType::LoroEphemeralStorePersisted => *b"%EPS",
             CrdtType::Yjs => *b"%YJS",
             CrdtType::YjsAwareness => *b"%YAW",
             CrdtType::Elo => *b"%ELO",
@@ -37,6 +40,7 @@ impl CrdtType {
         match &bytes {
             b"%LOR" => Some(CrdtType::Loro),
             b"%EPH" => Some(CrdtType::LoroEphemeralStore),
+            b"%EPS" => Some(CrdtType::LoroEphemeralStorePersisted),
             b"%YJS" => Some(CrdtType::Yjs),
             b"%YAW" => Some(CrdtType::YjsAwareness),
             b"%ELO" => Some(CrdtType::Elo),
@@ -145,8 +149,8 @@ impl BatchId {
         let mut out = [0u8; 8];
         for (i, slot) in out.iter_mut().enumerate() {
             let idx = i * 2;
-            let byte = u8::from_str_radix(&s[idx..idx + 2], 16)
-                .map_err(|_| "invalid hex".to_string())?;
+            let byte =
+                u8::from_str_radix(&s[idx..idx + 2], 16).map_err(|_| "invalid hex".to_string())?;
             *slot = byte;
         }
         Ok(BatchId(out))
