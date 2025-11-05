@@ -15,7 +15,14 @@ if (!Number.isSafeInteger(port) || port <= 0 || port > 65_535) {
 }
 
 const server = new SimpleServer({ port });
-server.start().then(() => {
-  // eslint-disable-next-line no-console
-  console.log(`SimpleServer listening on ws://localhost:${port}`);
-});
+server
+  .start()
+  .then(() => {
+    // eslint-disable-next-line no-console
+    console.log(`SimpleServer listening on ws://localhost:${port}`);
+  })
+  .catch((error) => {
+    // eslint-disable-next-line no-console
+    console.error("Failed to start SimpleServer:", error);
+    process.exit(1);
+  });
