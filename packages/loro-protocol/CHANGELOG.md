@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.3](https://github.com/loro-dev/protocol/compare/loro-protocol-v0.1.2...loro-protocol-v0.1.3) (2025-11-05)
+
+
+### Features
+
+* Add persistent EphemeralStore adaptors ([#18](https://github.com/loro-dev/protocol/issues/18)) ([db6bfab](https://github.com/loro-dev/protocol/commit/db6bfab148ac2a513387bc7bc1b293a36ddb257f))
+
 ## [0.1.2](https://github.com/loro-dev/protocol/compare/loro-protocol-v0.1.1...loro-protocol-v0.1.2) (2025-10-30)
 
 
