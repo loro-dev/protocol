@@ -9,6 +9,7 @@ on:
 permissions:
   contents: write
   pull-requests: write
+  id-token: write
 
 jobs:
   release:
@@ -29,6 +30,9 @@ jobs:
     needs: release
     if: ${{ needs.release.outputs.releases_created }}
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -52,8 +56,6 @@ jobs:
         run: pnpm -r build
 
       - name: Publish changed packages to npm
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: |
           set -euo pipefail
           echo "Finding unpublished workspace packages..."
