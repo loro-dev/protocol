@@ -147,6 +147,10 @@ export class LoroWebsocketClient {
     void this.connect();
   }
 
+  get socket(): WebSocket {
+    return this.ws;
+  }
+
   private ensureConnectedPromise(): void {
     if (this.resolveConnected) return;
     this.connectedPromise = new Promise<void>((resolve, reject) => {
