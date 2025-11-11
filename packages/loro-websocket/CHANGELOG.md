@@ -1,5 +1,23 @@
 # Changelog
 
+## [0.3.0](https://github.com/loro-dev/protocol/compare/loro-websocket-v0.2.1...loro-websocket-v0.3.0) (2025-11-11)
+
+
+### ⚠ BREAKING CHANGES
+
+* better api for server adaptor
+
+### Code Refactoring
+
+* better api for server adaptor ([a8f470b](https://github.com/loro-dev/protocol/commit/a8f470bd40857ee2e06e6db12648e5d5406de57d))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * loro-adaptors bumped to 0.3.0
+
 ## [0.2.1](https://github.com/loro-dev/protocol/compare/loro-websocket-v0.2.0...loro-websocket-v0.2.1) (2025-11-05)
 
 
