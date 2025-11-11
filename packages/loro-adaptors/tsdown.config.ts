@@ -6,5 +6,6 @@ export default defineConfig({
   dts: true,
   clean: true,
   sourcemap: true,
+  hash: false,
   external: ["loro-crdt", "loro-protocol"],
 });
