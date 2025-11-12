@@ -1,11 +1,8 @@
 import { EphemeralStore } from "loro-crdt";
 import {
   CrdtType,
-  Permission,
   MessageType,
   JoinResponseOk,
-  UpdateError,
-  UpdateErrorCode,
 } from "loro-protocol";
 import type { CrdtServerAdaptor } from "../types";
 
@@ -33,16 +30,12 @@ export class LoroPersistentStoreServerAdaptor implements CrdtServerAdaptor {
   handleJoinRequest(
     documentData: Uint8Array,
     _clientVersion: Uint8Array,
-    permission: Permission
-  ): {
-    response: JoinResponseOk;
-    updates?: Uint8Array[];
-  } {
+  ): { response: JoinResponseOk, updates?: Uint8Array[] } {
     const response: JoinResponseOk = {
       type: MessageType.JoinResponseOk,
       crdt: this.crdtType,
       roomId: "",
-      permission,
+      permission: "write",
       version: new Uint8Array(),
     };
 
@@ -53,63 +46,19 @@ export class LoroPersistentStoreServerAdaptor implements CrdtServerAdaptor {
   applyUpdates(
     documentData: Uint8Array,
     updates: Uint8Array[],
-    permission: Permission
-  ): {
-    success: boolean;
-    newDocumentData?: Uint8Array;
-    error?: UpdateError;
-    broadcastUpdates?: Uint8Array[];
-  } {
-    if (permission === "read") {
-      return {
-        success: false,
-        error: {
-          type: MessageType.UpdateError,
-          crdt: this.crdtType,
-          roomId: "",
-          code: UpdateErrorCode.PermissionDenied,
-          message: "Read-only permission, cannot apply updates",
-        },
-      };
-    }
-
+  ): Uint8Array {
     const store = new EphemeralStore(this.timeout);
-    const broadcastUpdates: Uint8Array[] = [];
-
-    try {
-      if (documentData.length > 0) {
-        store.apply(documentData);
-      }
-      for (const update of updates) {
-        if (update.length > 0) {
-          store.apply(update);
-          broadcastUpdates.push(update);
-        }
-      }
-
-      const newDocumentData = store.encodeAll();
-
-      return {
-        success: true,
-        newDocumentData,
-        broadcastUpdates:
-          broadcastUpdates.length > 0 ? broadcastUpdates : undefined,
-      };
-    } catch (error) {
-      return {
-        success: false,
-        error: {
-          type: MessageType.UpdateError,
-          crdt: this.crdtType,
-          roomId: "",
-          code: UpdateErrorCode.InvalidUpdate,
-          message: error instanceof Error ? error.message : "Invalid update",
-        },
-      };
-    } finally {
-      store.destroy();
-      store.inner.free();
+    if (documentData.length > 0) {
+      store.apply(documentData);
     }
+    for (const update of updates) {
+      if (update.length > 0) {
+        store.apply(update);
+      }
+    }
+
+    const newDocumentData = store.encodeAll();
+    return newDocumentData;
   }
 
   getVersion(_documentData: Uint8Array): Uint8Array {
