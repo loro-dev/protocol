@@ -7,9 +7,6 @@ import {
   CrdtType,
   JoinResponseOk,
   MessageType,
-  Permission,
-  UpdateError,
-  UpdateErrorCode,
 } from "loro-protocol";
 import type { CrdtServerAdaptor } from "../types";
 const encoder = new TextEncoder();
@@ -108,7 +105,6 @@ export class FlockServerAdaptor implements CrdtServerAdaptor {
   handleJoinRequest(
     documentData: Uint8Array,
     clientVersion: Uint8Array,
-    permission: Permission,
   ): {
     response: JoinResponseOk;
     updates?: Uint8Array[];
@@ -131,7 +127,7 @@ export class FlockServerAdaptor implements CrdtServerAdaptor {
       type: MessageType.JoinResponseOk,
       crdt: this.crdtType,
       roomId: "",
-      permission,
+      permission: "write",
       version: serverVersion,
     };
 
@@ -141,25 +137,7 @@ export class FlockServerAdaptor implements CrdtServerAdaptor {
   applyUpdates(
     documentData: Uint8Array,
     updates: Uint8Array[],
-    permission: Permission,
-  ): {
-    success: boolean;
-    newDocumentData?: Uint8Array;
-    error?: UpdateError;
-    broadcastUpdates?: Uint8Array[];
-  } {
-    if (permission === "read") {
-      return {
-        success: false,
-        error: {
-          type: MessageType.UpdateError,
-          crdt: this.crdtType,
-          roomId: "",
-          code: UpdateErrorCode.PermissionDenied,
-          message: "Read-only permission, cannot apply updates",
-        },
-      };
-    }
+  ): Uint8Array {
 
     const flock = new Flock();
     const broadcastUpdates: Uint8Array[] = [];
@@ -180,24 +158,9 @@ export class FlockServerAdaptor implements CrdtServerAdaptor {
         }
       }
 
-      const newDocumentData = serializeBundle(exportBundle(flock));
-      return {
-        success: true,
-        newDocumentData,
-        broadcastUpdates:
-          broadcastUpdates.length > 0 ? broadcastUpdates : undefined,
-      };
+      return serializeBundle(exportBundle(flock));
     } catch (error) {
-      return {
-        success: false,
-        error: {
-          type: MessageType.UpdateError,
-          crdt: this.crdtType,
-          roomId: "",
-          code: UpdateErrorCode.InvalidUpdate,
-          message: error instanceof Error ? error.message : "Invalid update",
-        },
-      };
+      throw new Error(error instanceof Error ? error.message : "Invalid update", { cause: error });
     }
   }
 

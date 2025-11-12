@@ -1,11 +1,8 @@
 import { EphemeralStore } from "loro-crdt";
 import {
   CrdtType,
-  Permission,
   MessageType,
   JoinResponseOk,
-  UpdateError,
-  UpdateErrorCode,
 } from "loro-protocol";
 import type { CrdtServerAdaptor } from "../types";
 
@@ -33,7 +30,6 @@ export class LoroEphemeralServerAdaptor implements CrdtServerAdaptor {
   handleJoinRequest(
     documentData: Uint8Array,
     _clientVersion: Uint8Array,
-    permission: Permission
   ): {
     response: JoinResponseOk;
     updates?: Uint8Array[];
@@ -42,7 +38,7 @@ export class LoroEphemeralServerAdaptor implements CrdtServerAdaptor {
       type: MessageType.JoinResponseOk,
       crdt: this.crdtType,
       roomId: "",
-      permission,
+      permission: "write",
       version: new Uint8Array(),
     };
 
@@ -53,26 +49,7 @@ export class LoroEphemeralServerAdaptor implements CrdtServerAdaptor {
   applyUpdates(
     documentData: Uint8Array,
     updates: Uint8Array[],
-    permission: Permission
-  ): {
-    success: boolean;
-    newDocumentData?: Uint8Array;
-    error?: UpdateError;
-    broadcastUpdates?: Uint8Array[];
-  } {
-    if (permission === "read") {
-      return {
-        success: false,
-        error: {
-          type: MessageType.UpdateError,
-          crdt: this.crdtType,
-          roomId: "",
-          code: UpdateErrorCode.PermissionDenied,
-          message: "Read-only permission, cannot apply updates",
-        },
-      };
-    }
-
+  ): Uint8Array {
     const store = new EphemeralStore(this.timeout);
     const broadcastUpdates: Uint8Array[] = [];
 
@@ -89,23 +66,9 @@ export class LoroEphemeralServerAdaptor implements CrdtServerAdaptor {
 
       const newDocumentData = store.encodeAll();
 
-      return {
-        success: true,
-        newDocumentData,
-        broadcastUpdates:
-          broadcastUpdates.length > 0 ? broadcastUpdates : undefined,
-      };
+      return newDocumentData;
     } catch (error) {
-      return {
-        success: false,
-        error: {
-          type: MessageType.UpdateError,
-          crdt: this.crdtType,
-          roomId: "",
-          code: UpdateErrorCode.InvalidUpdate,
-          message: error instanceof Error ? error.message : "Invalid update",
-        },
-      };
+      throw new Error(error instanceof Error ? error.message : "Invalid update", { cause: error });
     } finally {
       store.destroy();
       store.inner.free();
@@ -126,7 +89,6 @@ export class LoroEphemeralServerAdaptor implements CrdtServerAdaptor {
     try {
       return store.encodeAll();
     } finally {
-      store.destroy();
       store.inner.free();
     }
   }

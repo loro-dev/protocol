@@ -158,7 +158,7 @@ export class SimpleServer {
         );
 
         void closers
-          .catch(() => {})
+          .catch(() => { })
           .finally(() => {
             try {
               wss.close(() => {
@@ -179,16 +179,16 @@ export class SimpleServer {
   private async gracefulCloseWebSocket(ws: WebSocket): Promise<void> {
     try {
       await this.waitForSocketDrain(ws);
-    } catch {}
+    } catch { }
 
     try {
       ws.close(1001, "Server stopping");
-    } catch {}
+    } catch { }
 
     setTimeout(() => {
       try {
         if (ws.readyState !== WebSocket.CLOSED) ws.terminate();
-      } catch {}
+      } catch { }
     }, 50);
   }
 
@@ -303,12 +303,12 @@ export class SimpleServer {
       const joinResult = roomDoc.descriptor.adaptor.handleJoinRequest(
         roomDoc.data,
         message.version,
-        permission
       );
 
       // Send join response with current document version
       const response: JoinResponseOk = {
         ...joinResult.response,
+        permission,
         crdt: message.crdt,
         roomId: message.roomId,
       };
@@ -404,42 +404,30 @@ export class SimpleServer {
         message.crdt
       );
 
-      const res = roomDoc.descriptor.adaptor.applyUpdates(
-        roomDoc.data,
-        message.updates,
-        permission
-      );
-
-      if (!res.success) {
-        const baseError =
-          res.error ??
-          ({
-            type: MessageType.UpdateError,
-            crdt: message.crdt,
-            roomId: message.roomId,
-            code: UpdateErrorCode.InvalidUpdate,
-            message: "Invalid update",
-          } as UpdateError);
+      try {
+        const newDocumentData = roomDoc.descriptor.adaptor.applyUpdates(
+          roomDoc.data,
+          message.updates,
+        );
+        roomDoc.data = newDocumentData;
+      } catch (error) {
         const updateError: UpdateError = {
-          ...baseError,
+          type: MessageType.UpdateError,
           crdt: message.crdt,
           roomId: message.roomId,
+          code: UpdateErrorCode.InvalidUpdate,
+          message: error instanceof Error ? error.message : "Invalid update",
         };
         this.sendMessage(client.ws, updateError);
         return;
       }
 
-      if (res.newDocumentData) {
-        roomDoc.data = res.newDocumentData;
-      }
 
       if (roomDoc.descriptor.shouldPersist) {
         roomDoc.dirty = true;
       }
 
-      const updatesForBroadcast =
-        res.broadcastUpdates ?? message.updates;
-
+      const updatesForBroadcast = message.updates;
       if (updatesForBroadcast.length > 0) {
         const outgoing: DocUpdate = {
           type: MessageType.DocUpdate,
@@ -563,33 +551,23 @@ export class SimpleServer {
         message.roomId,
         message.crdt
       );
-      const res = roomDoc.descriptor.adaptor.applyUpdates(
-        roomDoc.data,
-        [totalData],
-        permission
-      );
-      if (!res.success) {
-        const baseError =
-          res.error ??
-          ({
-            type: MessageType.UpdateError,
-            crdt: message.crdt,
-            roomId: message.roomId,
-            code: UpdateErrorCode.InvalidUpdate,
-            message: "Invalid update",
-          } as UpdateError);
-        const error: UpdateError = {
-          ...baseError,
+      try {
+        const newDocumentData = roomDoc.descriptor.adaptor.applyUpdates(
+          roomDoc.data,
+          [totalData],
+        );
+        roomDoc.data = newDocumentData;
+      } catch (error) {
+        const updateError: UpdateError = {
+          type: MessageType.UpdateError,
           crdt: message.crdt,
           roomId: message.roomId,
-          batchId: message.batchId,
+          code: UpdateErrorCode.InvalidUpdate,
+          message: error instanceof Error ? error.message : "Invalid update",
         };
-        this.sendMessage(client.ws, error);
+        this.sendMessage(client.ws, updateError);
         client.fragments.delete(message.batchId);
         return;
-      }
-      if (res.newDocumentData) {
-        roomDoc.data = res.newDocumentData;
       }
       if (roomDoc.descriptor.shouldPersist) {
         roomDoc.dirty = true;
