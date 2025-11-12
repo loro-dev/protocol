@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.3.1](https://github.com/loro-dev/protocol/compare/loro-websocket-v0.3.0...loro-websocket-v0.3.1) (2025-11-12)
+
+
+### Features
+
+* expose socket in LoroWebsocketClient ([37f3a90](https://github.com/loro-dev/protocol/commit/37f3a90d6f863c1857ef185b81050b90d3e7dac6))
+
+
+### Bug Fixes
+
+* turn tsdown hash=false to mk build correct ([b2036d5](https://github.com/loro-dev/protocol/commit/b2036d5ef4fe99531603556061549670e022e72b))
+
 ## [0.3.0](https://github.com/loro-dev/protocol/compare/loro-websocket-v0.2.1...loro-websocket-v0.3.0) (2025-11-11)
 
 
