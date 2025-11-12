@@ -48,17 +48,22 @@ export class LoroPersistentStoreServerAdaptor implements CrdtServerAdaptor {
     updates: Uint8Array[],
   ): Uint8Array {
     const store = new EphemeralStore(this.timeout);
-    if (documentData.length > 0) {
-      store.apply(documentData);
-    }
-    for (const update of updates) {
-      if (update.length > 0) {
-        store.apply(update);
-      }
-    }
+    try {
 
-    const newDocumentData = store.encodeAll();
-    return newDocumentData;
+      if (documentData.length > 0) {
+        store.apply(documentData);
+      }
+      for (const update of updates) {
+        if (update.length > 0) {
+          store.apply(update);
+        }
+      }
+
+      const newDocumentData = store.encodeAll();
+      return newDocumentData;
+    } finally {
+      store.inner.free()
+    }
   }
 
   getVersion(_documentData: Uint8Array): Uint8Array {
@@ -67,12 +72,12 @@ export class LoroPersistentStoreServerAdaptor implements CrdtServerAdaptor {
 
   merge(documents: Uint8Array[]): Uint8Array {
     const store = new EphemeralStore(this.timeout);
-    for (const data of documents) {
-      if (data.length > 0) {
-        store.apply(data);
-      }
-    }
     try {
+      for (const data of documents) {
+        if (data.length > 0) {
+          store.apply(data);
+        }
+      }
       return store.encodeAll();
     } finally {
       store.destroy();

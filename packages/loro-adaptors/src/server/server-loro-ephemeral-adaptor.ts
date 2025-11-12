@@ -89,7 +89,6 @@ export class LoroEphemeralServerAdaptor implements CrdtServerAdaptor {
     try {
       return store.encodeAll();
     } finally {
-      store.destroy();
       store.inner.free();
     }
   }
