@@ -33,8 +33,8 @@ importers:
         specifier: ^1.1.0
         version: 1.1.0
       loro-crdt:
-        specifier: ^1.8.5
-        version: 1.8.5
+        specifier: ^1.9.0
+        version: 1.9.0
       loro-protocol:
         specifier: workspace:*
         version: link:../loro-protocol
@@ -76,8 +76,8 @@ importers:
         specifier: workspace:*
         version: link:../loro-adaptors
       loro-crdt:
-        specifier: ^1.7.1
-        version: 1.7.1
+        specifier: ^1.9.0
+        version: 1.9.0
       loro-protocol:
         specifier: workspace:*
         version: link:../loro-protocol
@@ -952,11 +952,8 @@ packages:
     engines: {node: '>=16'}
     hasBin: true
 
-  loro-crdt@1.7.1:
-    resolution: {integrity: sha512-lcSzNVTvjJIK6zf8IPpFoaK71dnAx2yz/9S438zH/TZhlqCj//H5Hq80khHGDBIIs69Ijv2kggpPfy/p/HO2bg==}
-
-  loro-crdt@1.8.5:
-    resolution: {integrity: sha512-sWWOjzV05RT/NrD42THaihg8kQGNTzPzroyEap7PzyXYIg9JPlTA6MWqt8gLqhpWKhYD2niisljB2+4iwGUZWA==}
+  loro-crdt@1.9.0:
+    resolution: {integrity: sha512-twXAoypRaqSj8t0KJxKPis7ceqcJufrolcB8GLRkq2iGdqJ2EKT+rCJgwVoVgx8dhgFfbJjJEnpLKRs/bY6TcQ==}
 
   loupe@3.2.0:
     resolution: {integrity: sha512-2NCfZcT5VGVNX9mSZIxLRkEAegDGBpuQZBy13desuHeVORmBDyAET4TkJr4SjqQy3A8JDofMN6LpkK8Xcm/dlw==}
@@ -1894,9 +1891,7 @@ snapshots:
     dependencies:
       isomorphic.js: 0.2.5
 
-  loro-crdt@1.7.1: {}
-
-  loro-crdt@1.8.5: {}
+  loro-crdt@1.9.0: {}
 
   loupe@3.2.0: {}
 

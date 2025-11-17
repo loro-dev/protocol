@@ -1,9 +1,5 @@
 import { EphemeralStore } from "loro-crdt";
-import {
-  CrdtType,
-  MessageType,
-  JoinResponseOk,
-} from "loro-protocol";
+import { CrdtType, MessageType, JoinResponseOk } from "loro-protocol";
 import type { CrdtServerAdaptor } from "../types";
 
 export interface LoroPersistentStoreServerAdaptorConfig {
@@ -29,8 +25,8 @@ export class LoroPersistentStoreServerAdaptor implements CrdtServerAdaptor {
 
   handleJoinRequest(
     documentData: Uint8Array,
-    _clientVersion: Uint8Array,
-  ): { response: JoinResponseOk, updates?: Uint8Array[] } {
+    _clientVersion: Uint8Array
+  ): { response: JoinResponseOk; updates?: Uint8Array[] } {
     const response: JoinResponseOk = {
       type: MessageType.JoinResponseOk,
       crdt: this.crdtType,
@@ -43,13 +39,9 @@ export class LoroPersistentStoreServerAdaptor implements CrdtServerAdaptor {
     return { response, updates };
   }
 
-  applyUpdates(
-    documentData: Uint8Array,
-    updates: Uint8Array[],
-  ): Uint8Array {
+  applyUpdates(documentData: Uint8Array, updates: Uint8Array[]): Uint8Array {
     const store = new EphemeralStore(this.timeout);
     try {
-
       if (documentData.length > 0) {
         store.apply(documentData);
       }
@@ -62,7 +54,8 @@ export class LoroPersistentStoreServerAdaptor implements CrdtServerAdaptor {
       const newDocumentData = store.encodeAll();
       return newDocumentData;
     } finally {
-      store.inner.free()
+      store.destroy();
+      store.inner.free();
     }
   }
 
@@ -85,4 +78,3 @@ export class LoroPersistentStoreServerAdaptor implements CrdtServerAdaptor {
     }
   }
 }
-
