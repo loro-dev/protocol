@@ -72,7 +72,7 @@
     "ws": "^8.18.3"
   },
   "devDependencies": {
-    "@loro-dev/flock": "^1.1.0",
+    "@loro-dev/flock": "^1.1.1",
     "get-port": "^7.1.0",
     "tsdown": "^0.14.1",
     "tsx": "^4.20.5",
@@ -80,6 +80,6 @@
     "vitest": "^3.2.4"
   },
   "peerDependencies": {
-    "loro-crdt": "^1.7.1"
+    "loro-crdt": "^1.9.0"
   }
 }

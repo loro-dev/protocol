@@ -15,8 +15,8 @@
     "loro-protocol": "workspace:*"
   },
   "peerDependencies": {
-    "@loro-dev/flock": "^1.1.0",
-    "loro-crdt": "^1.8.5",
+    "@loro-dev/flock": "^1.1.1",
+    "loro-crdt": "^1.9.0",
     "yjs": "*"
   },
   "peerDependenciesMeta": {
