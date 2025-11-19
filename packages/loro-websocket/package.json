@@ -1,6 +1,6 @@
 {
   "name": "loro-websocket",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "private": false,
   "description": "WebSocket client and SimpleServer for syncing CRDTs base on loro-protocol",
   "author": "Loro Team",

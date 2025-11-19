@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.1](https://github.com/loro-dev/protocol/compare/loro-adaptors-v0.3.0...loro-adaptors-v0.3.1) (2025-11-19)
+
+
+### Bug Fixes
+
+* we should call ephemeral destroy before free ([#24](https://github.com/loro-dev/protocol/issues/24)) ([43d7502](https://github.com/loro-dev/protocol/commit/43d7502e206dfbf954d913548d29ac15340728e2))
+
 ## [0.3.0](https://github.com/loro-dev/protocol/compare/loro-adaptors-v0.2.1...loro-adaptors-v0.3.0) (2025-11-11)
 
 
