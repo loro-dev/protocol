@@ -1,12 +1,6 @@
 import type { CrdtServerAdaptor } from "loro-adaptors";
-import {
-  getServerAdaptor,
-  registerServerAdaptor,
-  LoroServerAdaptor,
-  LoroEphemeralServerAdaptor,
-  LoroPersistentStoreServerAdaptor,
-  FlockServerAdaptor,
-} from "loro-adaptors";
+import { LoroServerAdaptor, LoroEphemeralServerAdaptor, LoroPersistentStoreServerAdaptor } from "loro-adaptors/loro";
+import { FlockServerAdaptor } from "loro-adaptors/flock";
 import { CrdtType } from "loro-protocol";
 import { EloServerAdaptor } from "./elo-server-adaptor";
 
@@ -19,7 +13,6 @@ export interface ServerAdaptorDescriptor {
 const descriptors = new Map<CrdtType, ServerAdaptorDescriptor>();
 
 function registerDescriptor(descriptor: ServerAdaptorDescriptor): void {
-  registerServerAdaptor(descriptor.adaptor);
   descriptors.set(descriptor.adaptor.crdtType, descriptor);
 }
 
@@ -65,12 +58,4 @@ export function getServerAdaptorDescriptor(
   crdtType: CrdtType
 ): ServerAdaptorDescriptor | undefined {
   return descriptors.get(crdtType);
-}
-
-export function ensureServerAdaptor(
-  crdtType: CrdtType
-): CrdtServerAdaptor | undefined {
-  const descriptor = descriptors.get(crdtType);
-  if (descriptor) return descriptor.adaptor;
-  return getServerAdaptor(crdtType);
 }

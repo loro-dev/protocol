@@ -1,11 +1,17 @@
 # loro-adaptors
 
-Adaptors that bridge the Loro protocol to `loro-crdt` documents and the ephemeral store. Includes an end‑to‑end encrypted adaptor for %ELO.
+Adaptors that bridge the Loro protocol to `loro-crdt` documents, `flock` replicas, and the ephemeral store. Includes an end‑to‑end encrypted adaptor for %ELO.
 
 ## Install
 
 ```bash
-pnpm add loro-adaptors loro-protocol loro-crdt
+pnpm add loro-adaptors loro-protocol
+
+# If using loro-crdt:
+pnpm add loro-crdt
+
+# If using flock:
+pnpm add @loro-dev/flock
 ```
 
 ## Why
@@ -15,9 +21,12 @@ The websocket client (`loro-websocket`) speaks the binary wire protocol. These a
 - `LoroAdaptor`: wraps a `LoroDoc` and streams local updates to the connection; applies remote updates on receipt
 - `LoroEphemeralAdaptor`: wraps an `EphemeralStore` for transient presence/cursor data
 - `LoroPersistentStoreAdaptor`: wraps an `EphemeralStore` but marks updates as persisted so the server stores them for new peers
-- `EloLoroAdaptor`: wraps a `LoroDoc` and packages updates into %ELO containers with AES‑GCM; decrypts inbound containers and imports plaintext.
+- `EloAdaptor`: wraps a `LoroDoc` and packages updates into %ELO containers with AES‑GCM; decrypts inbound containers and imports plaintext.
+- `FlockAdaptor`: wraps a `Flock` replica and streams local updates to the connection; applies remote updates on receipt.
 
 ## Usage
+
+### Loro
 
 ```ts
 import { LoroWebsocketClient } from "loro-websocket";
@@ -25,8 +34,8 @@ import {
   LoroAdaptor,
   LoroEphemeralAdaptor,
   LoroPersistentStoreAdaptor,
-  EloLoroAdaptor,
-} from "loro-adaptors";
+  EloAdaptor,
+} from "loro-adaptors/loro"; // Import from "loro-adaptors/loro" to avoid pulling in unused peer dependencies
 import { LoroDoc, EphemeralStore } from "loro-crdt";
 
 const client = new LoroWebsocketClient({ url: "ws://localhost:8787" });
@@ -53,7 +62,7 @@ const roomPersisted = await client.join({
 
 // %ELO (end‑to‑end encrypted Loro)
 const key = new Uint8Array(32);
-const elo = new EloLoroAdaptor({
+const elo = new EloAdaptor({
   getPrivateKey: async () => ({ keyId: "k1", key }),
 });
 const secure = await client.join({ roomId: "secure-room", crdtAdaptor: elo });
@@ -69,19 +78,39 @@ await roomPersisted.destroy();
 await secure.destroy();
 ```
 
+### Flock
+
+```ts
+import { LoroWebsocketClient } from "loro-websocket";
+import { FlockAdaptor } from "loro-adaptors/flock"; // Import from "loro-adaptors/flock"
+import { Flock } from "@loro-dev/flock";
+
+const client = new LoroWebsocketClient({ url: "ws://localhost:8787" });
+await client.waitConnected();
+
+const flock = new Flock();
+const adaptor = new FlockAdaptor(flock);
+const room = await client.join({ roomId: "flock-demo", crdtAdaptor: adaptor });
+```
+
+### YJS Awareness
+
+```ts
+import { YjsAwarenessServerAdaptor } from "loro-adaptors/yjs";
+// This is primarily for server-side use or specific awareness integration
+```
+
 ## API
 
-- `new LoroAdaptor(doc?: LoroDoc, config?: { onImportError?, onUpdateError? })`
-- `new LoroEphemeralAdaptor(store?: EphemeralStore)`
-- `new LoroPersistentStoreAdaptor(store?: EphemeralStore)`
-- `new EloLoroAdaptor(docOrConfig: LoroDoc | { getPrivateKey, ivFactory?, onDecryptError?, onUpdateError? })`
-  - `getPrivateKey: (keyId?) => Promise<{ keyId: string, key: CryptoKey | Uint8Array }>`
-  - Optional `ivFactory()` for testing (12‑byte IV)
-
-Notes (E2EE)
-
-- IV must be 12 bytes and unique per key. The `ivFactory` is for tests only.
-- The server never decrypts; it indexes plaintext headers to select backfill.
+- `loro-adaptors/loro`
+  - `new LoroAdaptor(doc?: LoroDoc, config?: { onImportError?, onUpdateError? })`
+  - `new LoroEphemeralAdaptor(store?: EphemeralStore)`
+  - `new LoroPersistentStoreAdaptor(store?: EphemeralStore)`
+  - `new EloAdaptor(docOrConfig: LoroDoc | { getPrivateKey, ivFactory?, onDecryptError?, onUpdateError? })`
+- `loro-adaptors/flock`
+  - `new FlockAdaptor(flock: Flock, config?: { onImportError?, onUpdateError? })`
+- `loro-adaptors/yjs`
+  - `new YjsAwarenessServerAdaptor()`
 
 ## Development
 

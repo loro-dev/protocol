@@ -68,6 +68,21 @@
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js",
       "require": "./dist/index.cjs"
+    },
+    "./flock": {
+      "types": "./dist/flock.d.ts",
+      "import": "./dist/flock.js",
+      "require": "./dist/flock.cjs"
+    },
+    "./yjs": {
+      "types": "./dist/yjs.d.ts",
+      "import": "./dist/yjs.js",
+      "require": "./dist/yjs.cjs"
+    },
+    "./loro": {
+      "types": "./dist/loro.d.ts",
+      "import": "./dist/loro.js",
+      "require": "./dist/loro.cjs"
     }
   },
   "files": [

@@ -12,7 +12,8 @@
     "clean": "pnpm -r clean",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
-    "dev-simple-server": "pnpm --filter loro-websocket exec tsx src/server/bin.ts"
+    "dev-simple-server": "pnpm --filter loro-websocket exec tsx src/server/bin.ts",
+    "check": "pnpm lint && pnpm typecheck && pnpm test"
   },
   "devDependencies": {
     "@rslint/core": "^0.1.11",

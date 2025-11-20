@@ -3,7 +3,7 @@ import { WebSocket } from "ws";
 import getPort from "get-port";
 import { SimpleServer } from "../src/server/simple-server";
 import { LoroWebsocketClient } from "../src/client";
-import { LoroAdaptor } from "loro-adaptors";
+import { LoroAdaptor } from "loro-adaptors/loro";
 
 // Make WebSocket available globally for the client
 Object.defineProperty(globalThis, "WebSocket", {

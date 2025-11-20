@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { LoroDoc } from "loro-crdt";
-import { EloAdaptor } from "../src/adaptors";
+import { EloAdaptor } from "../src/loro";
 import { CrdtType, MessageType } from "loro-protocol";
 import { parseEloRecordHeader, decodeEloContainer } from "loro-protocol";
 import { encryptDeltaSpan, encodeEloContainer } from "loro-protocol";

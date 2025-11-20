@@ -81,11 +81,3 @@ export interface CrdtServerAdaptor {
 
   merge(documents: Uint8Array[]): Uint8Array;
 }
-
-export interface AdaptorsForServer {
-  register(adaptor: CrdtServerAdaptor): void;
-  registerMany(adaptors: Iterable<CrdtServerAdaptor>): void;
-  get(crdtType: CrdtType): CrdtServerAdaptor | undefined;
-  clear(): void;
-  list(): CrdtServerAdaptor[];
-}

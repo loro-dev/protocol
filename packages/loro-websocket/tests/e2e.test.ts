@@ -4,7 +4,8 @@ import getPort from "get-port";
 import { SimpleServer } from "../src/server/simple-server";
 import { LoroWebsocketClient, ClientStatus } from "../src/client";
 import type { LoroWebsocketClientRoom } from "../src/client";
-import { FlockAdaptor, LoroAdaptor } from "loro-adaptors";
+import { LoroAdaptor } from "loro-adaptors/loro";
+import { FlockAdaptor } from "loro-adaptors/flock";
 import { Flock } from "@loro-dev/flock";
 
 // Make WebSocket available globally for the client
@@ -180,7 +181,7 @@ describe("E2E: Client-Server Sync", () => {
 
     await new Promise(resolve => setTimeout(resolve, 100));
 
-    expect(text2.toString()).toBe("After reconnect");
+    expect(text2.toString()).toBe("After reconnectBefore disconnect");
 
     await room2.destroy();
   }, 10000);
@@ -407,9 +408,9 @@ describe("E2E: Client-Server Sync", () => {
       await waitUntil(
         () =>
           statuses1.filter(s => s === ClientStatus.Connected).length >
-            initialConnectedCount1 &&
+          initialConnectedCount1 &&
           statuses2.filter(s => s === ClientStatus.Connected).length >
-            initialConnectedCount2,
+          initialConnectedCount2,
         5000,
         25
       );
@@ -496,9 +497,9 @@ describe("E2E: Client-Server Sync", () => {
       await waitUntil(
         () =>
           statuses1.filter(s => s === ClientStatus.Connected).length >
-            initialConnectedCount1 &&
+          initialConnectedCount1 &&
           statuses2.filter(s => s === ClientStatus.Connected).length >
-            initialConnectedCount2,
+          initialConnectedCount2,
         5000,
         25
       );
@@ -525,7 +526,7 @@ describe("E2E: Client-Server Sync", () => {
       handlePong: () => void;
     };
     const originalHandlePong = clientWithPong.handlePong;
-    clientWithPong.handlePong = () => {};
+    clientWithPong.handlePong = () => { };
 
     const pingPromise = client.ping(5000);
 

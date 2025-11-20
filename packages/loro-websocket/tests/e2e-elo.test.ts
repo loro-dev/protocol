@@ -12,7 +12,7 @@ import {
   type ProtocolMessage,
   type UpdateError,
 } from "loro-protocol";
-import { EloAdaptor } from "loro-adaptors";
+import { EloAdaptor } from "loro-adaptors/loro";
 
 // Make WebSocket available globally for the client
 Object.defineProperty(globalThis, "WebSocket", {
@@ -355,7 +355,7 @@ async function waitForJoinOk(ws: WebSocket): Promise<void> {
           clearTimeout(t);
           resolve();
         }
-      } catch {}
+      } catch { }
     });
   });
 }
@@ -372,7 +372,7 @@ async function waitForUpdateError(ws: WebSocket): Promise<UpdateError> {
           clearTimeout(t);
           resolve(msg);
         }
-      } catch {}
+      } catch { }
     });
   });
 }
