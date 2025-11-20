@@ -20,7 +20,6 @@ import {
   HexString,
   DocUpdateFragmentHeader,
   DocUpdateFragment,
-  bytesToHex,
   MAX_MESSAGE_SIZE,
 } from "loro-protocol";
 import {
@@ -276,7 +275,7 @@ export class SimpleServer {
       let permission: Permission = "write";
       if (this.config.authenticate) {
         const authResult = await this.config.authenticate(
-          this.roomIdToString(message.roomId),
+          message.roomId,
           message.crdt,
           message.auth
         );
@@ -624,7 +623,7 @@ export class SimpleServer {
     if (descriptor.shouldPersist && this.config.onLoadDocument) {
       try {
         const loaded = await this.config.onLoadDocument(
-          this.roomIdToString(roomId),
+          roomId,
           crdtType
         );
         if (loaded) {
@@ -703,17 +702,7 @@ export class SimpleServer {
   }
 
   private getRoomKey(roomId: RoomId, crdtType: CrdtType): string {
-    const roomStr = this.roomIdToString(roomId);
-    return `${roomStr}:${crdtType}`;
-  }
-
-  private roomIdToString(roomId: RoomId): string {
-    if (typeof roomId === "string") return roomId;
-    try {
-      return new TextDecoder("utf-8", { fatal: true }).decode(roomId);
-    } catch {
-      return bytesToHex(roomId);
-    }
+    return `${roomId}:${crdtType}`;
   }
 
   private parseRoomKey(

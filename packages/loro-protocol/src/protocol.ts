@@ -66,7 +66,7 @@ export const UpdateErrorCode = {
 export type UpdateErrorCode =
   (typeof UpdateErrorCode)[keyof typeof UpdateErrorCode];
 
-export type RoomId = string | Uint8Array;
+export type RoomId = string;
 
 export interface MessageBase {
   crdt: CrdtType;

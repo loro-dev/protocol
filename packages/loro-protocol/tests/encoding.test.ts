@@ -16,7 +16,7 @@ import {
 } from "../src/protocol";
 
 describe("Message Encoding and Decoding", () => {
-  const roomId = new Uint8Array([1, 2, 3, 4, 5]);
+  const roomId = "room-123";
 
   describe("JoinRequest", () => {
     it("encodes and decodes JoinRequest correctly", () => {
@@ -437,7 +437,7 @@ describe("Message Encoding and Decoding", () => {
       const message: Leave = {
         type: MessageType.Leave,
         crdt: CrdtType.Loro,
-        roomId: new Uint8Array([1, 2, 3]),
+        roomId: "room-123",
       };
 
       const encoded = encode(message);
@@ -466,7 +466,7 @@ describe("Message Encoding and Decoding", () => {
 
   describe("Room ID validation", () => {
     it("accepts room IDs up to 128 bytes", () => {
-      const maxRoomId = new Uint8Array(128);
+      const maxRoomId = "a".repeat(128);
       const message: Leave = {
         type: MessageType.Leave,
         crdt: CrdtType.Loro,
@@ -480,7 +480,7 @@ describe("Message Encoding and Decoding", () => {
     });
 
     it("throws error for room IDs exceeding 128 bytes during encode", () => {
-      const largeRoomId = new Uint8Array(129);
+      const largeRoomId = "a".repeat(129);
       const message: Leave = {
         type: MessageType.Leave,
         crdt: CrdtType.Loro,
@@ -542,7 +542,7 @@ describe("Message Encoding and Decoding", () => {
       const message: Leave = {
         type: MessageType.Leave,
         crdt: CrdtType.Loro,
-        roomId: new Uint8Array(0),
+        roomId: "",
       };
 
       const encoded = encode(message);

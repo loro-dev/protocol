@@ -1,27 +1,27 @@
 // Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
 
-exports[`encoding snapshots > DocUpdate multiple updates 1`] = `"0x25594a53040102030403030301020304040506070108"`;
+exports[`encoding snapshots > DocUpdate multiple updates 1`] = `"0x25594a5309726f6f6d2d3132333403030301020304040506070108"`;
 
-exports[`encoding snapshots > DocUpdateFragment 1`] = `"0x254c4f5204010203040500000000000000000320000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f"`;
+exports[`encoding snapshots > DocUpdateFragment 1`] = `"0x254c4f5209726f6f6d2d313233340500000000000000000320000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f"`;
 
-exports[`encoding snapshots > DocUpdateFragmentHeader 1`] = `"0x254c4f52040102030404ff112233445566770a80c03e"`;
+exports[`encoding snapshots > DocUpdateFragmentHeader 1`] = `"0x254c4f5209726f6f6d2d3132333404ff112233445566770a80c03e"`;
 
-exports[`encoding snapshots > JoinError app error with appCode 1`] = `"0x25594a530401020304027f1a4170706c69636174696f6e207370656369666963206572726f720e71756f74615f6578636565646564"`;
+exports[`encoding snapshots > JoinError app error with appCode 1`] = `"0x25594a5309726f6f6d2d31323334027f1a4170706c69636174696f6e207370656369666963206572726f720e71756f74615f6578636565646564"`;
 
-exports[`encoding snapshots > JoinError auth failed 1`] = `"0x254550480401020304020213496e76616c69642063726564656e7469616c73"`;
+exports[`encoding snapshots > JoinError auth failed 1`] = `"0x2545504809726f6f6d2d31323334020213496e76616c69642063726564656e7469616c73"`;
 
-exports[`encoding snapshots > JoinError version unknown with receiver version 1`] = `"0x254c4f52040102030402011056657273696f6e206d69736d61746368026364"`;
+exports[`encoding snapshots > JoinError version unknown with receiver version 1`] = `"0x254c4f5209726f6f6d2d3132333402011056657273696f6e206d69736d61746368026364"`;
 
-exports[`encoding snapshots > JoinRequest 1`] = `"0x254c4f52040102030400030a141e0328323c"`;
+exports[`encoding snapshots > JoinRequest 1`] = `"0x254c4f5209726f6f6d2d3132333400030a141e0328323c"`;
 
-exports[`encoding snapshots > JoinResponseOk read 1`] = `"0x25594a530401020304010472656164030b162100"`;
+exports[`encoding snapshots > JoinResponseOk read 1`] = `"0x25594a5309726f6f6d2d31323334010472656164030b162100"`;
 
-exports[`encoding snapshots > JoinResponseOk write + extra 1`] = `"0x254c4f52040102030401057772697465022c3703424d58"`;
+exports[`encoding snapshots > JoinResponseOk write + extra 1`] = `"0x254c4f5209726f6f6d2d3132333401057772697465022c3703424d58"`;
 
-exports[`encoding snapshots > Leave 1`] = `"0x254c4f52040102030407"`;
+exports[`encoding snapshots > Leave 1`] = `"0x254c4f5209726f6f6d2d3132333407"`;
 
-exports[`encoding snapshots > UpdateError app error with appCode 1`] = `"0x254c4f520401020304067f10437573746f6d20617070206572726f720f637573746f6d5f636f64655f313233"`;
+exports[`encoding snapshots > UpdateError app error with appCode 1`] = `"0x254c4f5209726f6f6d2d31323334067f10437573746f6d20617070206572726f720f637573746f6d5f636f64655f313233"`;
 
-exports[`encoding snapshots > UpdateError fragment timeout with batchId 1`] = `"0x255941570401020304060710467261676d656e742074696d656f75740100000000000000"`;
+exports[`encoding snapshots > UpdateError fragment timeout with batchId 1`] = `"0x2559415709726f6f6d2d31323334060710467261676d656e742074696d656f75740100000000000000"`;
 
-exports[`encoding snapshots > UpdateError permission denied 1`] = `"0x254c4f5204010203040603134e6f207772697465207065726d697373696f6e"`;
+exports[`encoding snapshots > UpdateError permission denied 1`] = `"0x254c4f5209726f6f6d2d313233340603134e6f207772697465207065726d697373696f6e"`;

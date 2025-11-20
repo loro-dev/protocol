@@ -504,10 +504,7 @@ export class LoroWebsocketClient {
   }
 
   private async handleMessage(msg: ProtocolMessage) {
-    const roomIdStr =
-      typeof msg.roomId === "string"
-        ? msg.roomId
-        : new TextDecoder().decode(msg.roomId);
+    const roomIdStr = msg.roomId;
     const roomId = msg.crdt + roomIdStr;
 
     switch (msg.type) {
@@ -555,10 +552,7 @@ export class LoroWebsocketClient {
         if (active) {
           active.handler.handleUpdateError(msg);
         } else {
-          const roomIdStr =
-            typeof msg.roomId === "string"
-              ? msg.roomId
-              : new TextDecoder().decode(msg.roomId);
+          const roomIdStr = msg.roomId;
           console.error(
             `Update error for room ${roomIdStr}: ${msg.code} - ${msg.message}`
           );
@@ -569,10 +563,7 @@ export class LoroWebsocketClient {
   }
 
   private handleFragmentHeader(msg: DocUpdateFragmentHeader) {
-    const roomIdStr =
-      typeof msg.roomId === "string"
-        ? msg.roomId
-        : new TextDecoder().decode(msg.roomId);
+    const roomIdStr = msg.roomId;
     const batchKey = `${msg.crdt}-${roomIdStr}-${msg.batchId}`;
 
     // Clear any existing batch with same ID
@@ -608,10 +599,7 @@ export class LoroWebsocketClient {
   }
 
   private handleFragment(msg: DocUpdateFragment) {
-    const roomIdStr =
-      typeof msg.roomId === "string"
-        ? msg.roomId
-        : new TextDecoder().decode(msg.roomId);
+    const roomIdStr = msg.roomId;
     const batchKey = `${msg.crdt}-${roomIdStr}-${msg.batchId}`;
     const batch = this.fragmentBatches.get(batchKey);
 

@@ -27,7 +27,7 @@ import { encode, decode, CrdtType, MessageType } from "loro-protocol";
 const join = encode({
   type: MessageType.JoinRequest,
   crdt: CrdtType.Loro,
-  roomId: new TextEncoder().encode("room-1"),
+  roomId: "room-1",
   auth: new Uint8Array(),
   version: new Uint8Array(),
 });

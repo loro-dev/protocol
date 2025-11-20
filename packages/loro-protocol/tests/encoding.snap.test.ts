@@ -19,7 +19,7 @@ import {
 // TODO: REVIEW ensure binary snapshots stay stable across changes to protocol
 
 describe("encoding snapshots", () => {
-  const roomId = new Uint8Array([1, 2, 3, 4]);
+  const roomId = "room-1234";
 
   it("JoinRequest", () => {
     const msg: JoinRequest = {

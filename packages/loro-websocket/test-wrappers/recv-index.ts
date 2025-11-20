@@ -26,7 +26,7 @@ async function main() {
   const join: ProtocolMessage = {
     type: MessageType.JoinRequest,
     crdt: CrdtType.Elo,
-    roomId: Buffer.from(roomId),
+    roomId: roomId,
     auth: new Uint8Array(),
     version: new Uint8Array(),
   };

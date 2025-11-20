@@ -26,7 +26,7 @@ Exception: the protocol also defines two out‑of‑band keepalive frames, "ping
   - "%YAW": Yjs Awareness
   - "%FLO": Flock Document
   - ...
-- Followed by a `varBytes` room ID (maximum 128 bytes).
+- Followed by a `varString` room ID (maximum 128 bytes).
   - If two room IDs are the same but the CRDT types differ, they refer to different rooms.
 - Followed by a byte for the message type.
 - Payload, which depends on the message type.
