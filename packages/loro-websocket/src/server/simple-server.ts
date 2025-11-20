@@ -708,7 +708,12 @@ export class SimpleServer {
   }
 
   private roomIdToString(roomId: RoomId): string {
-    return typeof roomId === "string" ? roomId : bytesToHex(roomId);
+    if (typeof roomId === "string") return roomId;
+    try {
+      return new TextDecoder("utf-8", { fatal: true }).decode(roomId);
+    } catch {
+      return bytesToHex(roomId);
+    }
   }
 
   private parseRoomKey(
