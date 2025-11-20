@@ -29,7 +29,7 @@ async fn join_sends_snapshot_from_loader() {
     let url = format!("ws://{}/ws1?token=secret", addr);
     let mut c = Client::connect(&url).await.unwrap();
     // Join
-    let room = b"room-load".to_vec();
+    let room = "room-load".to_string();
     let join = proto::ProtocolMessage::JoinRequest { crdt: CrdtType::Loro, room_id: room.clone(), auth: Vec::new(), version: Vec::new() };
     c.send(&join).await.unwrap();
 

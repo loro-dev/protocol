@@ -53,7 +53,7 @@ const MAX_BATCH_BYTES: u64 = 64 * 1024 * 1024; // 64 MiB per batch
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct RoomKey {
     crdt: CrdtType,
-    room: Vec<u8>,
+    room: String,
 }
 impl Hash for RoomKey {
     fn hash<H: Hasher>(&self, state: &mut H) {
@@ -480,7 +480,7 @@ impl Hub {
             if let Some(state) = self.docs.get(&k) {
                 if state.doc.remove_when_last_subscriber_leaves() {
                     self.docs.remove(&k);
-                    debug!(room=?String::from_utf8_lossy(&k.room), "cleaned up ephemeral doc after last subscriber left");
+                    debug!(room=?k.room, "cleaned up ephemeral doc after last subscriber left");
                 }
             }
         }
@@ -508,7 +508,7 @@ impl Hub {
             }
             if !dead.is_empty() {
                 list.retain(|(id, _)| !dead.contains(id));
-                debug!(room=?String::from_utf8_lossy(&room.room), removed=%dead.len(), "removed dead subscribers");
+                debug!(room=?room.room, removed=%dead.len(), "removed dead subscribers");
             }
         }
     }
@@ -521,7 +521,7 @@ impl Hub {
             CrdtType::Loro => {
                 let mut d = LoroRoomDoc::new();
                 if let Some(loader) = &self.config.on_load_document {
-                    let room_str = String::from_utf8_lossy(&room.room).to_string();
+                    let room_str = room.room.clone();
                     let ws = self.workspace.clone();
                     match (loader)(ws, room_str, room.crdt).await {
                         Ok(Some(bytes)) => {
@@ -529,7 +529,7 @@ impl Hub {
                         }
                         Ok(None) => {}
                         Err(e) => {
-                            warn!(room=?String::from_utf8_lossy(&room.room), %e, "load document failed");
+                            warn!(room=?room.room, %e, "load document failed");
                         }
                     }
                 }
@@ -554,7 +554,7 @@ impl Hub {
             CrdtType::LoroEphemeralStorePersisted => {
                 let mut d = PersistentEphemeralRoomDoc::new(Self::EPHEMERAL_TIMEOUT_MS);
                 if let Some(loader) = &self.config.on_load_document {
-                    let room_str = String::from_utf8_lossy(&room.room).to_string();
+                    let room_str = room.room.clone();
                     let ws = self.workspace.clone();
                     match (loader)(ws, room_str, room.crdt).await {
                         Ok(Some(bytes)) => {
@@ -562,7 +562,7 @@ impl Hub {
                         }
                         Ok(None) => {}
                         Err(e) => {
-                            warn!(room=?String::from_utf8_lossy(&room.room), %e, "load persisted ephemeral store failed");
+                            warn!(room=?room.room, %e, "load persisted ephemeral store failed");
                         }
                     }
                 }
@@ -598,7 +598,7 @@ impl Hub {
     fn apply_updates(&mut self, room: &RoomKey, updates: &[Vec<u8>]) {
         if let Some(state) = self.docs.get_mut(room) {
             if let Err(e) = state.doc.apply_updates(updates) {
-                warn!(room=?String::from_utf8_lossy(&room.room), %e, "apply_updates failed");
+                warn!(room=?room.room, %e, "apply_updates failed");
             } else if state.doc.should_persist() {
                 state.dirty = true;
             }
@@ -724,7 +724,7 @@ impl HubRegistry {
                             if state.dirty && state.doc.should_persist() {
                                 let start = std::time::Instant::now();
                                 if let Some(snapshot) = state.doc.export_snapshot() {
-                                    let room_str = String::from_utf8_lossy(&room.room).to_string();
+                                    let room_str = room.room.clone();
                                     match (saver)(ws.clone(), room_str.clone(), room.crdt, snapshot)
                                         .await
                                     {
@@ -907,7 +907,7 @@ async fn handle_conn(
                             // authenticate
                             let mut permission = h.config.default_permission;
                             if let Some(auth_fn) = &h.config.authenticate {
-                                let room_str = String::from_utf8_lossy(&room.room).to_string();
+                                let room_str = room.room.clone();
                                 match (auth_fn)(room_str, room.crdt, auth.clone()).await {
                                     Ok(Some(p)) => {
                                         permission = p;
@@ -924,7 +924,7 @@ async fn handle_conn(
                                         if let Ok(bytes) = loro_protocol::encode(&err) {
                                             let _ = tx.send(Message::Binary(bytes.into()));
                                         }
-                                        warn!(room=?String::from_utf8_lossy(&room.room), "join denied by authenticate() returning None");
+                                        warn!(room=?room.room, "join denied by authenticate() returning None");
                                         continue;
                                     }
                                     Err(e) => {
@@ -939,7 +939,7 @@ async fn handle_conn(
                                         if let Ok(bytes) = loro_protocol::encode(&err) {
                                             let _ = tx.send(Message::Binary(bytes.into()));
                                         }
-                                        warn!(room=?String::from_utf8_lossy(&room.room), "join denied due to authenticate() error");
+                                        warn!(room=?room.room, "join denied due to authenticate() error");
                                         continue;
                                     }
                                 }
@@ -948,7 +948,7 @@ async fn handle_conn(
                             h.join(conn_id, room.clone(), &tx);
                             h.perms.insert((conn_id, room.clone()), permission);
                             joined_rooms.insert(room.clone());
-                            info!(workspace=%h.workspace, room=?String::from_utf8_lossy(&room.room), ?permission, "join ok");
+                            info!(workspace=%h.workspace, room=?room.room, ?permission, "join ok");
                             // respond ok with current version and empty extra
                             let current_version = h.current_version_bytes(&room);
                             let ok = ProtocolMessage::JoinResponseOk {
@@ -971,7 +971,7 @@ async fn handle_conn(
                                 };
                                 if let Ok(bytes) = loro_protocol::encode(&du) {
                                     let _ = tx.send(Message::Binary(bytes.into()));
-                                    debug!(room=?String::from_utf8_lossy(&room.room), "sent initial snapshot after join");
+                                    debug!(room=?room.room, "sent initial snapshot after join");
                                 }
                             } else {
                                 // Otherwise, attempt backfill if other clients present or the CRDT allows
@@ -1000,7 +1000,7 @@ async fn handle_conn(
                                         }
                                     }
                                     if backfill_cnt > 0 {
-                                        debug!(room=?String::from_utf8_lossy(&room.room), cnt=%backfill_cnt, "sent backfill after join");
+                                        debug!(room=?room.room, cnt=%backfill_cnt, "sent backfill after join");
                                     }
                                 }
                             }
@@ -1191,7 +1191,7 @@ async fn handle_conn(
                                             let start = std::time::Instant::now();
                                             h.apply_updates(&room, &updates);
                                             let elapsed_ms = start.elapsed().as_millis();
-                                            debug!(room=?String::from_utf8_lossy(&room.room), updates=%updates.len(), ms=%elapsed_ms, "applied reassembled updates");
+                                            debug!(room=?room.room, updates=%updates.len(), ms=%elapsed_ms, "applied reassembled updates");
                                         }
                                     }
                                     CrdtType::Elo => {
@@ -1224,7 +1224,7 @@ async fn handle_conn(
                                 if let Ok(bytes) = loro_protocol::encode(&err) {
                                     let _ = tx.send(Message::Binary(bytes.into()));
                                 }
-                                warn!(room=?String::from_utf8_lossy(&room.room), "update rejected: not joined");
+                                warn!(room=?room.room, "update rejected: not joined");
                             } else {
                                 // Check permission
                                 let perm = hub
@@ -1257,13 +1257,13 @@ async fn handle_conn(
                                         h.apply_updates(&room, &updates);
                                         let elapsed_ms = start.elapsed().as_millis();
                                         h.broadcast(&room, conn_id, Message::Binary(data));
-                                        debug!(room=?String::from_utf8_lossy(&room.room), updates=%updates.len(), ms=%elapsed_ms, "applied and broadcast updates");
+                                        debug!(room=?room.room, updates=%updates.len(), ms=%elapsed_ms, "applied and broadcast updates");
                                     }
                                     CrdtType::Elo => {
                                         // Index headers only; payload remains opaque to server.
                                         h.apply_updates(&room, &updates);
                                         h.broadcast(&room, conn_id, Message::Binary(data));
-                                        debug!(room=?String::from_utf8_lossy(&room.room), updates=%updates.len(), "indexed and broadcast ELO updates");
+                                        debug!(room=?room.room, updates=%updates.len(), "indexed and broadcast ELO updates");
                                     }
                                     _ => {
                                         h.broadcast(&room, conn_id, Message::Binary(data));

@@ -27,7 +27,7 @@ async fn readonly_receives_updates_writer_sends() {
     let mut writer = Client::connect(&url).await.unwrap();
     let mut reader = Client::connect(&url).await.unwrap();
 
-    let room = b"room-ro".to_vec();
+    let room = "room-ro".to_string();
     // Join writer with auth "writer"
     let join_w = proto::ProtocolMessage::JoinRequest { crdt: CrdtType::Loro, room_id: room.clone(), auth: b"writer".to_vec(), version: Vec::new() };
     writer.send(&join_w).await.unwrap();

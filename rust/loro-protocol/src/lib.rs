@@ -19,7 +19,7 @@
 //! // Build a JoinRequest
 //! let msg = ProtocolMessage::JoinRequest {
 //!     crdt: CrdtType::Loro,
-//!     room_id: vec![1,2,3,4],
+//!     room_id: "room-123".to_string(),
 //!     auth: vec![10,20,30],
 //!     version: vec![40,50,60],
 //! };

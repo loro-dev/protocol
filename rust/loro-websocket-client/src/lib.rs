@@ -13,7 +13,7 @@
 //! #   let rt = tokio::runtime::Builder::new_current_thread().enable_all().build()?;
 //! #   rt.block_on(async move {
 //! let mut client = Client::connect("ws://127.0.0.1:9000").await?;
-//! client.send(&ProtocolMessage::Leave { crdt: CrdtType::Loro, room_id: vec![1,2,3] }).await?;
+//! client.send(&ProtocolMessage::Leave { crdt: CrdtType::Loro, room_id: "room1".to_string() }).await?;
 //! if let Some(msg) = client.next().await? {
 //!     println!("got: {:?}", msg);
 //! }
@@ -414,7 +414,7 @@ impl ConnectionWorker {
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct RoomKey {
     crdt: CrdtType,
-    room: Vec<u8>,
+    room: String,
 }
 impl Hash for RoomKey {
     fn hash<H: Hasher>(&self, state: &mut H) {
@@ -545,7 +545,7 @@ impl LoroWebsocketClient {
     ) -> Result<LoroWebsocketClientRoom, ClientError> {
         let key = RoomKey {
             crdt: CrdtType::Loro,
-            room: room_id.as_bytes().to_vec(),
+            room: room_id.to_string(),
         };
         // Register room without subscription first
         self.rooms.lock().await.insert(
@@ -647,7 +647,7 @@ impl LoroWebsocketClient {
     ) -> Result<LoroWebsocketClientRoom, ClientError> {
         let key = RoomKey {
             crdt: adaptor.crdt_type(),
-            room: room_id.as_bytes().to_vec(),
+            room: room_id.to_string(),
         };
 
         // Register adaptor for this room, but not active until JoinResponseOk completes.
@@ -899,7 +899,7 @@ fn msg_crdt(msg: &ProtocolMessage) -> CrdtType {
     }
 }
 
-fn msg_room_id(msg: &ProtocolMessage) -> Vec<u8> {
+fn msg_room_id(msg: &ProtocolMessage) -> String {
     match msg {
         ProtocolMessage::JoinRequest { room_id, .. }
         | ProtocolMessage::JoinResponseOk { room_id, .. }

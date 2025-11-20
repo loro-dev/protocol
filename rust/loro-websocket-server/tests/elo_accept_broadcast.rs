@@ -17,7 +17,7 @@ async fn elo_accepts_join_and_broadcasts_updates() {
     let mut c1 = Client::connect(&url).await.unwrap();
     let mut c2 = Client::connect(&url).await.unwrap();
 
-    let room_id = b"room-elo".to_vec();
+    let room_id = "room-elo".to_string();
 
     // Both clients join the same %ELO room
     let j1 = proto::ProtocolMessage::JoinRequest { crdt: CrdtType::Elo, room_id: room_id.clone(), auth: Vec::new(), version: Vec::new() };

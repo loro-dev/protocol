@@ -19,7 +19,7 @@ async fn reject_update_without_join() {
     let mut c = Client::connect(&url).await.unwrap();
 
     // Send DocUpdate without a prior JoinRequest
-    let msg = proto::ProtocolMessage::DocUpdate { crdt: CrdtType::Loro, room_id: b"room-no-join".to_vec(), updates: vec![vec![1,2,3]] };
+    let msg = proto::ProtocolMessage::DocUpdate { crdt: CrdtType::Loro, room_id: "room-no-join".to_string(), updates: vec![vec![1,2,3]] };
     c.send(&msg).await.unwrap();
 
     // Expect UpdateError.PermissionDenied

@@ -172,20 +172,20 @@ impl BatchId {
 pub enum ProtocolMessage {
     JoinRequest {
         crdt: CrdtType,
-        room_id: Vec<u8>,
+        room_id: String,
         auth: Vec<u8>,
         version: Vec<u8>,
     },
     JoinResponseOk {
         crdt: CrdtType,
-        room_id: Vec<u8>,
+        room_id: String,
         permission: Permission,
         version: Vec<u8>,
         extra: Option<Vec<u8>>,
     },
     JoinError {
         crdt: CrdtType,
-        room_id: Vec<u8>,
+        room_id: String,
         code: JoinErrorCode,
         message: String,
         receiver_version: Option<Vec<u8>>,
@@ -193,26 +193,26 @@ pub enum ProtocolMessage {
     },
     DocUpdate {
         crdt: CrdtType,
-        room_id: Vec<u8>,
+        room_id: String,
         updates: Vec<Vec<u8>>,
     },
     DocUpdateFragmentHeader {
         crdt: CrdtType,
-        room_id: Vec<u8>,
+        room_id: String,
         batch_id: BatchId,
         fragment_count: u64,
         total_size_bytes: u64,
     },
     DocUpdateFragment {
         crdt: CrdtType,
-        room_id: Vec<u8>,
+        room_id: String,
         batch_id: BatchId,
         index: u64,
         fragment: Vec<u8>,
     },
     UpdateError {
         crdt: CrdtType,
-        room_id: Vec<u8>,
+        room_id: String,
         code: UpdateErrorCode,
         message: String,
         batch_id: Option<BatchId>,
@@ -220,6 +220,6 @@ pub enum ProtocolMessage {
     },
     Leave {
         crdt: CrdtType,
-        room_id: Vec<u8>,
+        room_id: String,
     },
 }

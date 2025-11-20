@@ -27,7 +27,7 @@ async fn elo_fragment_reassembly_broadcasts_original_frames() {
     let mut c2 = Client::connect(&url).await.unwrap();
 
     // Join %ELO room
-    let room_id = b"room-frag-elo".to_vec();
+    let room_id = "room-frag-elo".to_string();
     c1.send(&proto::ProtocolMessage::JoinRequest { crdt: CrdtType::Elo, room_id: room_id.clone(), auth: Vec::new(), version: Vec::new() }).await.unwrap();
     c2.send(&proto::ProtocolMessage::JoinRequest { crdt: CrdtType::Elo, room_id: room_id.clone(), auth: Vec::new(), version: Vec::new() }).await.unwrap();
     // Await JoinResponseOk for both with timeouts

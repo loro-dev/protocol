@@ -54,9 +54,10 @@ pub fn encode(message: &ProtocolMessage) -> Result<Vec<u8>, String> {
         | ProtocolMessage::DocUpdateFragment { crdt, room_id, batch_id: _, index: _, fragment: _ }
         | ProtocolMessage::UpdateError { crdt, room_id, code: _, message: _, batch_id: _, app_code: _ }
         | ProtocolMessage::Leave { crdt, room_id } => {
-            if room_id.len() > MAX_ROOM_ID_LENGTH { return Err("Room ID too long".into()); }
+            let room_id_bytes = room_id.as_bytes();
+            if room_id_bytes.len() > MAX_ROOM_ID_LENGTH { return Err("Room ID too long".into()); }
             encode_crdt(&mut w, *crdt);
-            w.push_var_bytes(room_id);
+            w.push_var_bytes(room_id_bytes);
         }
     }
 
@@ -136,8 +137,8 @@ pub fn decode(buf: &[u8]) -> Result<ProtocolMessage, String> {
 
     // CRDT
     let crdt = decode_crdt(&mut r)?;
-    // room id (varBytes)
-    let room_id = r.read_var_bytes()?.to_vec();
+    // room id (varString)
+    let room_id = r.read_var_string()?;
     if room_id.len() > MAX_ROOM_ID_LENGTH {
         return Err("Room ID exceeds maximum length of 128 bytes".into());
     }
@@ -233,7 +234,7 @@ mod tests {
     fn encode_decode_leave() {
         let msg = ProtocolMessage::Leave {
             crdt: CrdtType::Loro,
-            room_id: vec![1,2,3,4,5],
+            room_id: "room-123".to_string(),
         };
         let enc = encode(&msg).unwrap();
         let dec = decode(&enc).unwrap();
@@ -244,7 +245,7 @@ mod tests {
     fn encode_join_response_ok_defaults_extra() {
         let msg = ProtocolMessage::JoinResponseOk {
             crdt: CrdtType::Yjs,
-            room_id: vec![1,2,3],
+            room_id: "room-123".to_string(),
             permission: Permission::Read,
             version: vec![10,20],
             extra: None,
