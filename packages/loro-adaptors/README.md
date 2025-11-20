@@ -12,6 +12,9 @@ pnpm add loro-crdt
 
 # If using flock:
 pnpm add @loro-dev/flock
+
+# If using yjs:
+pnpm add yjs
 ```
 
 ## Why
@@ -23,6 +26,7 @@ The websocket client (`loro-websocket`) speaks the binary wire protocol. These a
 - `LoroPersistentStoreAdaptor`: wraps an `EphemeralStore` but marks updates as persisted so the server stores them for new peers
 - `EloAdaptor`: wraps a `LoroDoc` and packages updates into %ELO containers with AES‑GCM; decrypts inbound containers and imports plaintext.
 - `FlockAdaptor`: wraps a `Flock` replica and streams local updates to the connection; applies remote updates on receipt.
+- `YjsAwarenessServerAdaptor`: handles Yjs awareness updates on the server side (opaque blob merging).
 
 ## Usage
 
