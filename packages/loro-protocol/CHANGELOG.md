@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.2.0](https://github.com/loro-dev/protocol/compare/loro-protocol-v0.1.3...loro-protocol-v0.2.0) (2025-11-20)
+
+
+### ⚠ BREAKING CHANGES
+
+* enforce to use string for room-id ([#27](https://github.com/loro-dev/protocol/issues/27))
+
+### Bug Fixes
+
+* enforce to use string for room-id ([#27](https://github.com/loro-dev/protocol/issues/27)) ([2eeea76](https://github.com/loro-dev/protocol/commit/2eeea7663827070cf88bb4354c89187d59df53b2))
+
 ## [0.1.3](https://github.com/loro-dev/protocol/compare/loro-protocol-v0.1.2...loro-protocol-v0.1.3) (2025-11-05)
 
 

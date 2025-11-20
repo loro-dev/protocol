@@ -1,5 +1,30 @@
 # Changelog
 
+## [0.4.0](https://github.com/loro-dev/protocol/compare/loro-websocket-v0.3.1...loro-websocket-v0.4.0) (2025-11-20)
+
+
+### ⚠ BREAKING CHANGES
+
+* enforce to use string for room-id ([#27](https://github.com/loro-dev/protocol/issues/27))
+* Introduce subpath exports and remove server-registry abstraction in loro-adaptors ([#25](https://github.com/loro-dev/protocol/issues/25))
+
+### Bug Fixes
+
+* enforce to use string for room-id ([#27](https://github.com/loro-dev/protocol/issues/27)) ([2eeea76](https://github.com/loro-dev/protocol/commit/2eeea7663827070cf88bb4354c89187d59df53b2))
+
+
+### Code Refactoring
+
+* Introduce subpath exports and remove server-registry abstraction in loro-adaptors ([#25](https://github.com/loro-dev/protocol/issues/25)) ([d5f2460](https://github.com/loro-dev/protocol/commit/d5f2460cd78ab63c11a8f216af13bf6aed49fc91))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * loro-protocol bumped to 0.2.0
+    * loro-adaptors bumped to 0.4.0
+
 ## [0.3.1](https://github.com/loro-dev/protocol/compare/loro-websocket-v0.3.0...loro-websocket-v0.3.1) (2025-11-19)
 
 
