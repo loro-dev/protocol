@@ -183,7 +183,7 @@ Adaptors bridge the client to actual CRDT state:
 
 - `LoroAdaptor` – Loro document (`const adaptor = new LoroAdaptor()`).
 - `LoroEphemeralAdaptor` – transient presence (`%EPH`).
-- `EloLoroAdaptor` – `%ELO` encrypted Loro with `getPrivateKey()`.
+- `EloAdaptor` – `%ELO` encrypted Loro with `getPrivateKey()`.
 
 ### 3.2 Constructor Options
 

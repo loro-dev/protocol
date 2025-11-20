@@ -15,7 +15,7 @@ function hexToBytes(hex: string): Uint8Array {
   return out;
 }
 
-describe("EloLoroAdaptor — snapshot join", () => {
+describe("EloAdaptor — snapshot join", () => {
   let doc: LoroDoc;
   let adaptor: EloAdaptor;
   const key = hexToBytes(KEY_HEX);
@@ -60,7 +60,7 @@ describe("EloLoroAdaptor — snapshot join", () => {
   });
 });
 
-describe("EloLoroAdaptor — apply snapshot update", () => {
+describe("EloAdaptor — apply snapshot update", () => {
   it("applies a snapshot container and updates the doc", async () => {
     const key = hexToBytes(KEY_HEX);
     // Create a source doc with content
@@ -99,7 +99,7 @@ describe("EloLoroAdaptor — apply snapshot update", () => {
   });
 });
 
-describe("EloLoroAdaptor — apply delta update", () => {
+describe("EloAdaptor — apply delta update", () => {
   it("applies a delta container update and updates the doc", async () => {
     const key = hexToBytes(KEY_HEX);
     // Create source update plaintext via standard update export

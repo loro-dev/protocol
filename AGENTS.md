@@ -38,7 +38,7 @@ pnpm clean
 - **packages/loro-protocol**: Protocol types and binary encoders/decoders, bytes utilities, and `%ELO` container/crypto helpers (TypeScript). Key files: `src/{protocol,encoding,bytes,e2ee}.ts` with tests under `src/`.
 - **packages/loro-websocket**: WebSocket client and a `SimpleServer` (TypeScript).
   - Features: message fragmentation/reassembly (≤256 KiB), connection‑scoped keepalive frames (`"ping"/"pong"` text), permission hooks, optional persistence hooks.
-- **packages/loro-adaptors**: Adaptors that connect the WebSocket client to `loro-crdt` (`LoroAdaptor`, `LoroEphemeralAdaptor`) and `%ELO` (`EloLoroAdaptor`).
+- **packages/loro-adaptors**: Adaptors that connect the WebSocket client to `loro-crdt` (`LoroAdaptor`, `LoroEphemeralAdaptor`) and `%ELO` (`EloAdaptor`).
 - **examples/excalidraw-example**: React demo using `SimpleServer`; syncs a Loro doc and ephemeral presence.
 - **rust/**: Rust workspace mirroring the TS packages:
   - `rust/loro-protocol`: Encoder/decoder parity with JS (snapshot tests included).

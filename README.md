@@ -69,7 +69,7 @@ Tip: For a working reference, see `packages/loro-websocket/src/e2e.test.ts` whic
 
 `%ELO` adds end‑to‑end encryption to Loro sync. The server never decrypts; it indexes plaintext headers only to support backfill and routing. Clients encrypt/decrypt using AES‑GCM with a 12‑byte IV and the exact encoded header bytes as AAD.
 
-- TypeScript: use `EloLoroAdaptor` from `loro-adaptors` + `LoroWebsocketClient`.
+- TypeScript: use `EloAdaptor` from `loro-adaptors` + `LoroWebsocketClient`.
   - Provide a `getPrivateKey()` hook that resolves `{ keyId, key }` (Web Crypto CryptoKey or Uint8Array).
   - The adaptor packages updates into `%ELO` containers and decrypts incoming ones, applying to its internal `LoroDoc`.
 
@@ -77,7 +77,7 @@ Example (Node 18+):
 
 ```ts
 import { LoroWebsocketClient } from "loro-websocket/client";
-import { EloLoroAdaptor } from "loro-adaptors/loro";
+import { EloAdaptor } from "loro-adaptors/loro";
 import { WebSocket } from "ws";
 (globalThis as any).WebSocket =
   WebSocket as unknown as typeof globalThis.WebSocket;
@@ -89,7 +89,7 @@ const key = new Uint8Array([
 
 const client = new LoroWebsocketClient({ url: "ws://localhost:8787" });
 await client.waitConnected();
-const adaptor = new EloLoroAdaptor({
+const adaptor = new EloAdaptor({
   getPrivateKey: async () => ({ keyId: "k1", key }),
 });
 const room = await client.join({ roomId: "elo-room", crdtAdaptor: adaptor });

@@ -1,6 +1,6 @@
 import { WebSocket as NodeWebSocket } from "ws";
 import { LoroWebsocketClient } from "../src/client";
-import { EloLoroAdaptor } from "loro-adaptors";
+import { EloAdaptor } from "loro-adaptors/loro";
 import { pathToFileURL } from "node:url";
 
 function hexToBytes(s: string): Uint8Array {
@@ -25,7 +25,7 @@ async function main() {
   const key = hexToBytes(
     "0x000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f"
   );
-  const adaptor = new EloLoroAdaptor({
+  const adaptor = new EloAdaptor({
     getPrivateKey: async () => ({ keyId: "k1", key }),
   });
   const client = new LoroWebsocketClient({ url });

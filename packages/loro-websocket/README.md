@@ -41,18 +41,18 @@ await room.destroy();
 offStatus();
 ```
 
-%ELO (end‑to‑end encrypted Loro) using `EloLoroAdaptor`:
+%ELO (end‑to‑end encrypted Loro) using `EloAdaptor`:
 
 ```ts
 import { LoroWebsocketClient } from "loro-websocket";
-import { EloLoroAdaptor } from "loro-adaptors/loro";
+import { EloAdaptor } from "loro-adaptors/loro";
 
 const key = new Uint8Array(32);
 key[0] = 1;
 const client = new LoroWebsocketClient({ url: "ws://localhost:8787" });
 await client.waitConnected();
 
-const adaptor = new EloLoroAdaptor({
+const adaptor = new EloAdaptor({
   getPrivateKey: async () => ({ keyId: "k1", key }),
 });
 await client.join({ roomId: "secure-room", crdtAdaptor: adaptor });

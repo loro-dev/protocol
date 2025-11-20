@@ -16,9 +16,9 @@ import {
 } from "loro-protocol";
 
 // Minimal placeholder to avoid requiring DOM lib in this package
-interface CryptoKey {}
+interface CryptoKey { }
 
-export interface EloLoroAdaptorConfig {
+export interface EloAdaptorConfig {
   getPrivateKey: (
     keyId?: string
   ) => Promise<{ keyId: string; key: CryptoKey | Uint8Array }>;
@@ -36,7 +36,7 @@ export class EloAdaptor implements CrdtDocAdaptor {
   private doc: LoroDoc;
   private ctx?: CrdtAdaptorContext;
   private destroyed = false;
-  private config: EloLoroAdaptorConfig;
+  private config: EloAdaptorConfig;
   private localUpdateUnsubscribe?: () => void;
   private initServerVersion?: VersionVector;
   private hasReachedServerVersion = false;
@@ -48,15 +48,15 @@ export class EloAdaptor implements CrdtDocAdaptor {
   private lastSentVV?: Record<string, number>;
 
   // Overloads to allow (config) or (doc, config)
-  constructor(doc: LoroDoc, config: EloLoroAdaptorConfig);
-  constructor(config: EloLoroAdaptorConfig);
+  constructor(doc: LoroDoc, config: EloAdaptorConfig);
+  constructor(config: EloAdaptorConfig);
   constructor(
-    docOrConfig: LoroDoc | EloLoroAdaptorConfig,
-    maybeConfig?: EloLoroAdaptorConfig
+    docOrConfig: LoroDoc | EloAdaptorConfig,
+    maybeConfig?: EloAdaptorConfig
   ) {
     if (docOrConfig instanceof LoroDoc) {
       this.doc = docOrConfig;
-      this.config = maybeConfig as EloLoroAdaptorConfig;
+      this.config = maybeConfig as EloAdaptorConfig;
     } else {
       this.doc = new LoroDoc();
       this.config = docOrConfig;
