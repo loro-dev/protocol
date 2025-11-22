@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.4.1](https://github.com/loro-dev/protocol/compare/loro-adaptors-v0.4.0...loro-adaptors-v0.4.1) (2025-11-22)
+
+
+### Bug Fixes
+
+* use oplog version ([5d556c5](https://github.com/loro-dev/protocol/commit/5d556c5491e0655bb7d10f57686c81510c34dfdb))
+
 ## [0.4.0](https://github.com/loro-dev/protocol/compare/loro-adaptors-v0.3.1...loro-adaptors-v0.4.0) (2025-11-20)
 
 
