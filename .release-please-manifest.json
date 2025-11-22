@@ -1,5 +1,5 @@
 {
-  "packages/loro-adaptors": "0.4.0",
+  "packages/loro-adaptors": "0.4.1",
   "packages/loro-protocol": "0.2.0",
-  "packages/loro-websocket": "0.4.0"
+  "packages/loro-websocket": "0.4.1"
 }
