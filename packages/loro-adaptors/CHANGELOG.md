@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.4.2](https://github.com/loro-dev/protocol/compare/loro-adaptors-v0.4.1...loro-adaptors-v0.4.2) (2025-11-28)
+
+
+### Bug Fixes
+
+* flock adaptor should only upload updates made by the current peer ([70dc0c6](https://github.com/loro-dev/protocol/commit/70dc0c6cf62d7d590e6e879c39726b42773752b4))
+
 ## [0.4.1](https://github.com/loro-dev/protocol/compare/loro-adaptors-v0.4.0...loro-adaptors-v0.4.1) (2025-11-22)
 
 
