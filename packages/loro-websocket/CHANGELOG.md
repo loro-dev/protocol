@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.4.2](https://github.com/loro-dev/protocol/compare/loro-websocket-v0.4.1...loro-websocket-v0.4.2) (2025-11-28)
+
+
+### Bug Fixes
+
+* flock adaptor should only upload updates made by the current peer ([70dc0c6](https://github.com/loro-dev/protocol/commit/70dc0c6cf62d7d590e6e879c39726b42773752b4))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * loro-adaptors bumped to 0.4.2
+
 ## [0.4.1](https://github.com/loro-dev/protocol/compare/loro-websocket-v0.4.0...loro-websocket-v0.4.1) (2025-11-22)
 
 
