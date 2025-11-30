@@ -6,6 +6,8 @@ description = "Simple async WebSocket server skeleton for the Loro protocol"
 license = "MIT"
 repository = "https://github.com/loro-dev/protocol"
 readme = "README.md"
+keywords = ["crdt", "websocket", "sync", "loro", "server"]
+categories = ["network-programming", "asynchronous", "web-programming::websocket"]
 
 [lib]
 name = "loro_websocket_server"

@@ -6,6 +6,8 @@ description = "Rust implementation of the Loro Syncing Protocol encoder/decoder"
 license = "MIT"
 repository = "https://github.com/loro-dev/protocol"
 readme = "README.md"
+keywords = ["crdt", "sync", "protocol", "loro"]
+categories = ["network-programming", "encoding", "data-structures"]
 
 [lib]
 name = "loro_protocol"
