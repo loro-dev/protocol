@@ -10,11 +10,13 @@
 
 use clap::Parser;
 use std::{error::Error, path::PathBuf};
-use tracing::{debug, error, info, warn};
+use tracing::info;
 use tracing_subscriber::EnvFilter;
 
 use loro_websocket_server::protocol::CrdtType;
-use loro_websocket_server::{serve_incoming_with_config, ServerConfig};
+use loro_websocket_server::{
+    serve_incoming_with_config, LoadDocArgs, LoadedDoc, SaveDocArgs, ServerConfig,
+};
 use tokio::net::TcpListener;
 
 #[derive(Parser, Debug)]
@@ -72,37 +74,53 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
 
     // Wire persistence hooks
     let db_for_load = db_path.clone();
-    type LoadFut = std::pin::Pin<
-        Box<dyn std::future::Future<Output = Result<Option<Vec<u8>>, String>> + Send>,
-    >;
+    type LoadFut =
+        std::pin::Pin<Box<dyn std::future::Future<Output = Result<LoadedDoc<()>, String>> + Send>>;
     type SaveFut = std::pin::Pin<Box<dyn std::future::Future<Output = Result<(), String>> + Send>>;
 
-    let on_load = std::sync::Arc::new(move |workspace: String, room: String, crdt: CrdtType| {
+    let on_load = std::sync::Arc::new(move |args: LoadDocArgs| {
         let db_path = db_for_load.clone();
         let fut = async move {
-            tokio::task::spawn_blocking(move || load_snapshot(&db_path, &workspace, &room, crdt))
-                .await
-                .map_err(|e| format!("task join error: {e}"))?
+            let LoadDocArgs {
+                workspace,
+                room,
+                crdt,
+            } = args;
+            let snapshot = tokio::task::spawn_blocking(move || {
+                load_snapshot(&db_path, &workspace, &room, crdt)
+            })
+            .await
+            .map_err(|e| format!("task join error: {e}"))?;
+            let snapshot = snapshot?;
+            Ok(LoadedDoc {
+                snapshot,
+                ctx: None,
+            })
         };
         let fut: LoadFut = Box::pin(fut);
         fut
     });
 
     let db_for_save = db_path.clone();
-    let on_save = std::sync::Arc::new(
-        move |workspace: String, room: String, crdt: CrdtType, data: Vec<u8>| {
-            let db_path = db_for_save.clone();
-            let fut = async move {
-                tokio::task::spawn_blocking(move || {
-                    save_snapshot(&db_path, &workspace, &room, crdt, &data)
-                })
-                .await
-                .map_err(|e| format!("task join error: {e}"))?
-            };
-            let fut: SaveFut = Box::pin(fut);
-            fut
-        },
-    );
+    let on_save = std::sync::Arc::new(move |args: SaveDocArgs<()>| {
+        let db_path = db_for_save.clone();
+        let fut = async move {
+            let SaveDocArgs {
+                workspace,
+                room,
+                crdt,
+                data,
+                ..
+            } = args;
+            tokio::task::spawn_blocking(move || {
+                save_snapshot(&db_path, &workspace, &room, crdt, &data)
+            })
+            .await
+            .map_err(|e| format!("task join error: {e}"))?
+        };
+        let fut: SaveFut = Box::pin(fut);
+        fut
+    });
 
     let cfg = ServerConfig {
         on_load_document: Some(on_load),

@@ -74,12 +74,34 @@ impl Hash for RoomKey {
 type Sender = mpsc::UnboundedSender<Message>;
 
 // Hook types
-type LoadFuture = Pin<Box<dyn Future<Output = Result<Option<Vec<u8>>, String>> + Send + 'static>>;
+/// Snapshot payload returned by `on_load_document` alongside optional metadata
+/// that will be passed through to `on_save_document`.
+pub struct LoadedDoc<DocCtx> {
+    pub snapshot: Option<Vec<u8>>,
+    pub ctx: Option<DocCtx>,
+}
+
+/// Arguments provided to `on_load_document`.
+pub struct LoadDocArgs {
+    pub workspace: String,
+    pub room: String,
+    pub crdt: CrdtType,
+}
+
+/// Arguments provided to `on_save_document`.
+pub struct SaveDocArgs<DocCtx> {
+    pub workspace: String,
+    pub room: String,
+    pub crdt: CrdtType,
+    pub data: Vec<u8>,
+    pub ctx: Option<DocCtx>,
+}
+
+type LoadFuture<DocCtx> =
+    Pin<Box<dyn Future<Output = Result<LoadedDoc<DocCtx>, String>> + Send + 'static>>;
 type SaveFuture = Pin<Box<dyn Future<Output = Result<(), String>> + Send + 'static>>;
-// workspace, room, crdt
-type LoadFn = Arc<dyn Fn(String, String, CrdtType) -> LoadFuture + Send + Sync>;
-// workspace, room, crdt, data
-type SaveFn = Arc<dyn Fn(String, String, CrdtType, Vec<u8>) -> SaveFuture + Send + Sync>;
+type LoadFn<DocCtx> = Arc<dyn Fn(LoadDocArgs) -> LoadFuture<DocCtx> + Send + Sync>;
+type SaveFn<DocCtx> = Arc<dyn Fn(SaveDocArgs<DocCtx>) -> SaveFuture + Send + Sync>;
 type AuthFuture =
     Pin<Box<dyn Future<Output = Result<Option<Permission>, String>> + Send + 'static>>;
 type AuthFn = Arc<dyn Fn(String, CrdtType, Vec<u8>) -> AuthFuture + Send + Sync>;
@@ -87,9 +109,9 @@ type AuthFn = Arc<dyn Fn(String, CrdtType, Vec<u8>) -> AuthFuture + Send + Sync>
 type HandshakeAuthFn = dyn Fn(&str, Option<&str>) -> bool + Send + Sync;
 
 #[derive(Clone)]
-pub struct ServerConfig {
-    pub on_load_document: Option<LoadFn>,
-    pub on_save_document: Option<SaveFn>,
+pub struct ServerConfig<DocCtx = ()> {
+    pub on_load_document: Option<LoadFn<DocCtx>>,
+    pub on_save_document: Option<SaveFn<DocCtx>>,
     pub save_interval_ms: Option<u64>,
     pub default_permission: Permission,
     pub authenticate: Option<AuthFn>,
@@ -407,7 +429,7 @@ impl CrdtDoc for EloRoomDoc {
         true
     }
 }
-impl Default for ServerConfig {
+impl<DocCtx> Default for ServerConfig<DocCtx> {
     fn default() -> Self {
         Self {
             on_load_document: None,
@@ -420,17 +442,18 @@ impl Default for ServerConfig {
     }
 }
 
-struct RoomDocState {
+struct RoomDocState<DocCtx> {
     doc: Box<dyn CrdtDoc>,
     dirty: bool,
+    ctx: Option<DocCtx>,
 }
 
-struct Hub {
+struct Hub<DocCtx> {
     // room -> vec of (conn_id, sender)
     subs: HashMap<RoomKey, Vec<(u64, Sender)>>,
     // room -> document state (Loro persistent, Ephemeral in-memory, Elo index)
-    docs: HashMap<RoomKey, RoomDocState>,
-    config: ServerConfig,
+    docs: HashMap<RoomKey, RoomDocState<DocCtx>>,
+    config: ServerConfig<DocCtx>,
     // (conn_id, room) -> permission
     perms: HashMap<(u64, RoomKey), Permission>,
     workspace: String,
@@ -438,8 +461,11 @@ struct Hub {
     fragments: HashMap<(RoomKey, protocol::BatchId), FragmentBatch>,
 }
 
-impl Hub {
-    fn new(config: ServerConfig, workspace: String) -> Self {
+impl<DocCtx> Hub<DocCtx>
+where
+    DocCtx: Clone + Send + Sync + 'static,
+{
+    fn new(config: ServerConfig<DocCtx>, workspace: String) -> Self {
         Self {
             subs: HashMap::new(),
             docs: HashMap::new(),
@@ -520,14 +546,20 @@ impl Hub {
         match room.crdt {
             CrdtType::Loro => {
                 let mut d = LoroRoomDoc::new();
+                let mut ctx = None;
                 if let Some(loader) = &self.config.on_load_document {
-                    let room_str = room.room.clone();
-                    let ws = self.workspace.clone();
-                    match (loader)(ws, room_str, room.crdt).await {
-                        Ok(Some(bytes)) => {
-                            d.import_snapshot(&bytes);
+                    let args = LoadDocArgs {
+                        workspace: self.workspace.clone(),
+                        room: room.room.clone(),
+                        crdt: room.crdt,
+                    };
+                    match (loader)(args).await {
+                        Ok(loaded) => {
+                            if let Some(bytes) = loaded.snapshot {
+                                d.import_snapshot(&bytes);
+                            }
+                            ctx = loaded.ctx;
                         }
-                        Ok(None) => {}
                         Err(e) => {
                             warn!(room=?room.room, %e, "load document failed");
                         }
@@ -538,6 +570,7 @@ impl Hub {
                     RoomDocState {
                         doc: Box::new(d),
                         dirty: false,
+                        ctx,
                     },
                 );
             }
@@ -548,19 +581,26 @@ impl Hub {
                     RoomDocState {
                         doc: Box::new(d),
                         dirty: false,
+                        ctx: None,
                     },
                 );
             }
             CrdtType::LoroEphemeralStorePersisted => {
                 let mut d = PersistentEphemeralRoomDoc::new(Self::EPHEMERAL_TIMEOUT_MS);
+                let mut ctx = None;
                 if let Some(loader) = &self.config.on_load_document {
-                    let room_str = room.room.clone();
-                    let ws = self.workspace.clone();
-                    match (loader)(ws, room_str, room.crdt).await {
-                        Ok(Some(bytes)) => {
-                            d.import_snapshot(&bytes);
+                    let args = LoadDocArgs {
+                        workspace: self.workspace.clone(),
+                        room: room.room.clone(),
+                        crdt: room.crdt,
+                    };
+                    match (loader)(args).await {
+                        Ok(loaded) => {
+                            if let Some(bytes) = loaded.snapshot {
+                                d.import_snapshot(&bytes);
+                            }
+                            ctx = loaded.ctx;
                         }
-                        Ok(None) => {}
                         Err(e) => {
                             warn!(room=?room.room, %e, "load persisted ephemeral store failed");
                         }
@@ -571,6 +611,7 @@ impl Hub {
                     RoomDocState {
                         doc: Box::new(d),
                         dirty: false,
+                        ctx,
                     },
                 );
             }
@@ -581,6 +622,7 @@ impl Hub {
                     RoomDocState {
                         doc: Box::new(d),
                         dirty: false,
+                        ctx: None,
                     },
                 );
             }
@@ -625,7 +667,10 @@ struct FragmentBatch {
     chunks: Vec<Option<Vec<u8>>>,
 }
 
-impl Hub {
+impl<DocCtx> Hub<DocCtx>
+where
+    DocCtx: Clone + Send + Sync + 'static,
+{
     fn start_fragment_batch(
         &mut self,
         room: &RoomKey,
@@ -684,20 +729,23 @@ impl Hub {
 
 static NEXT_ID: AtomicU64 = AtomicU64::new(1);
 
-struct HubRegistry {
-    config: ServerConfig,
-    hubs: tokio::sync::Mutex<HashMap<String, Arc<tokio::sync::Mutex<Hub>>>>,
+struct HubRegistry<DocCtx> {
+    config: ServerConfig<DocCtx>,
+    hubs: tokio::sync::Mutex<HashMap<String, Arc<tokio::sync::Mutex<Hub<DocCtx>>>>>,
 }
 
-impl HubRegistry {
-    fn new(config: ServerConfig) -> Self {
+impl<DocCtx> HubRegistry<DocCtx>
+where
+    DocCtx: Clone + Send + Sync + 'static,
+{
+    fn new(config: ServerConfig<DocCtx>) -> Self {
         Self {
             config,
             hubs: tokio::sync::Mutex::new(HashMap::new()),
         }
     }
 
-    async fn get_or_create(&self, workspace: &str) -> Arc<tokio::sync::Mutex<Hub>> {
+    async fn get_or_create(&self, workspace: &str) -> Arc<tokio::sync::Mutex<Hub<DocCtx>>> {
         let mut map = self.hubs.lock().await;
         if let Some(h) = map.get(workspace) {
             return h.clone();
@@ -725,9 +773,15 @@ impl HubRegistry {
                                 let start = std::time::Instant::now();
                                 if let Some(snapshot) = state.doc.export_snapshot() {
                                     let room_str = room.room.clone();
-                                    match (saver)(ws.clone(), room_str.clone(), room.crdt, snapshot)
-                                        .await
-                                    {
+                                    let ctx = state.ctx.clone();
+                                    let args = SaveDocArgs {
+                                        workspace: ws.clone(),
+                                        room: room_str.clone(),
+                                        crdt: room.crdt,
+                                        data: snapshot,
+                                        ctx,
+                                    };
+                                    match (saver)(args).await {
                                         Ok(()) => {
                                             state.dirty = false;
                                             let elapsed = start.elapsed();
@@ -753,20 +807,23 @@ impl HubRegistry {
 pub async fn serve(addr: &str) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     info!(%addr, "binding TCP listener");
     let listener = TcpListener::bind(addr).await?;
-    serve_incoming_with_config(listener, ServerConfig::default()).await
+    serve_incoming_with_config::<()>(listener, ServerConfig::default()).await
 }
 
 /// Serve a pre-bound listener. Useful for tests to bind on port 0.
 pub async fn serve_incoming(
     listener: TcpListener,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    serve_incoming_with_config(listener, ServerConfig::default()).await
+    serve_incoming_with_config::<()>(listener, ServerConfig::default()).await
 }
 
-pub async fn serve_incoming_with_config(
+pub async fn serve_incoming_with_config<DocCtx>(
     listener: TcpListener,
-    config: ServerConfig,
-) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    config: ServerConfig<DocCtx>,
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>>
+where
+    DocCtx: Clone + Send + Sync + 'static,
+{
     let registry = Arc::new(HubRegistry::new(config.clone()));
 
     loop {
@@ -788,10 +845,13 @@ pub async fn serve_incoming_with_config(
     }
 }
 
-async fn handle_conn(
+async fn handle_conn<DocCtx>(
     stream: TcpStream,
-    registry: Arc<HubRegistry>,
-) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    registry: Arc<HubRegistry<DocCtx>>,
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>>
+where
+    DocCtx: Clone + Send + Sync + 'static,
+{
     // Capture config outside of non-async closure
     let handshake_auth = registry.config.handshake_auth.clone();
     let workspace_holder: Arc<std::sync::Mutex<Option<String>>> =
@@ -842,11 +902,12 @@ async fn handle_conn(
                     // Provide a small body for clarity
                     let response = builder
                         .body(Some("Unauthorized".to_string()))
-                        .unwrap_or_else(|_| {
-                            tungstenite::http::Response::builder()
-                                .status(401)
-                                .body(None)
-                                .unwrap()
+                        .unwrap_or_else(|e| {
+                            warn!(?e, "failed to build unauthorized response");
+                            let mut fallback =
+                                tungstenite::http::Response::new(Some("Unauthorized".to_string()));
+                            *fallback.status_mut() = tungstenite::http::StatusCode::UNAUTHORIZED;
+                            fallback
                         });
                     return Err(response);
                 }
