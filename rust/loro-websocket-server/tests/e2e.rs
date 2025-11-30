@@ -3,6 +3,8 @@ use loro_websocket_client::LoroWebsocketClient;
 use loro_websocket_server as server;
 use std::sync::Arc;
 
+type Cfg = server::ServerConfig<()>;
+
 // helper removed: not used
 
 #[tokio::test(flavor = "current_thread")]
@@ -11,11 +13,13 @@ async fn e2e_sync_two_clients_docupdate_roundtrip() {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
     let server_task = tokio::spawn(async move {
-        let cfg = server::ServerConfig {
+        let cfg: Cfg = server::ServerConfig {
             handshake_auth: Some(Arc::new(|_ws, token| token == Some("secret"))),
             ..Default::default()
         };
-        server::serve_incoming_with_config(listener, cfg).await.unwrap();
+        server::serve_incoming_with_config(listener, cfg)
+            .await
+            .unwrap();
     });
 
     let url = format!("ws://{}/ws1?token=secret", addr);
@@ -60,11 +64,13 @@ async fn workspaces_are_isolated() {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
     let server_task = tokio::spawn(async move {
-        let cfg = server::ServerConfig {
+        let cfg: Cfg = server::ServerConfig {
             handshake_auth: Some(Arc::new(|_ws, token| token == Some("secret"))),
             ..Default::default()
         };
-        server::serve_incoming_with_config(listener, cfg).await.unwrap();
+        server::serve_incoming_with_config(listener, cfg)
+            .await
+            .unwrap();
     });
 
     let url1 = format!("ws://{}/workspaceA?token=secret", addr);
@@ -97,11 +103,13 @@ async fn e2e_sync_two_clients_loro_adaptor_roundtrip() {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
     let server_task = tokio::spawn(async move {
-        let cfg = server::ServerConfig {
+        let cfg: Cfg = server::ServerConfig {
             handshake_auth: Some(Arc::new(|_ws, token| token == Some("secret"))),
             ..Default::default()
         };
-        server::serve_incoming_with_config(listener, cfg).await.unwrap();
+        server::serve_incoming_with_config(listener, cfg)
+            .await
+            .unwrap();
     });
 
     let url = format!("ws://{}/ws-loro-adaptor?token=secret", addr);
@@ -145,11 +153,13 @@ async fn e2e_sync_two_clients_elo_adaptor_roundtrip() {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
     let server_task = tokio::spawn(async move {
-        let cfg = server::ServerConfig {
+        let cfg: Cfg = server::ServerConfig {
             handshake_auth: Some(Arc::new(|_ws, token| token == Some("secret"))),
             ..Default::default()
         };
-        server::serve_incoming_with_config(listener, cfg).await.unwrap();
+        server::serve_incoming_with_config(listener, cfg)
+            .await
+            .unwrap();
     });
 
     // %ELO lives under its own workspace path

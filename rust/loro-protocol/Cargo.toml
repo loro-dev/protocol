@@ -5,7 +5,7 @@ edition = "2021"
 description = "Rust implementation of the Loro Syncing Protocol encoder/decoder"
 license = "MIT"
 repository = "https://example.com/"
-readme = false
+readme = "README.md"
 
 [lib]
 name = "loro_protocol"
