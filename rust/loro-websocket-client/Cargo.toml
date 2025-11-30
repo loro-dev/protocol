@@ -4,13 +4,15 @@ version = "0.1.0"
 edition = "2021"
 description = "Async WebSocket client for the Loro protocol"
 license = "MIT"
+repository = "https://github.com/loro-dev/protocol"
+readme = "README.md"
 
 [lib]
 name = "loro_websocket_client"
 path = "src/lib.rs"
 
 [dependencies]
-loro-protocol = { path = "../loro-protocol" }
+loro-protocol = { version = "0.1.0", path = "../loro-protocol" }
 tokio = { version = "1", features = ["rt", "macros", "net", "time", "sync"] }
 tokio-tungstenite = "0.27"
 futures-util = { version = "0.3", default-features = false, features = ["sink"] }

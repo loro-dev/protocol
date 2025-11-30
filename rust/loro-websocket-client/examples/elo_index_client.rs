@@ -27,7 +27,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         "sender" => {
             // Prepare desired state before join so adaptor sends it as initial snapshot
             {
-                let mut d = doc.lock().await;
+                let d = doc.lock().await;
                 d.get_text("t").insert(0, "hi").unwrap();
                 d.commit();
             }

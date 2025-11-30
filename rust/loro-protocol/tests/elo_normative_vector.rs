@@ -29,7 +29,7 @@ fn normative_vector_deltaspan_header_and_ct_align_with_spec() {
     let key_id = "k1";
     let iv = hex_to_bytes("0x86bcad09d5e7e3d70503a57e");
     assert_eq!(iv.len(), 12);
-    let plaintext = hex_to_bytes("0x01026869"); // varUint 1, varBytes("hi")
+    let _plaintext = hex_to_bytes("0x01026869"); // varUint 1, varBytes("hi")
 
     // Encode header exactly as spec (this becomes AAD)
     let mut w = BytesWriter::new();
@@ -73,4 +73,3 @@ fn normative_vector_deltaspan_header_and_ct_align_with_spec() {
     // Also verify magic mapping exists (parity with TS)
     assert_eq!(CrdtType::Elo.magic_bytes(), *b"%ELO");
 }
-

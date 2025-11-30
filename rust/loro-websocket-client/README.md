@@ -4,6 +4,8 @@ Async WebSocket client for the Loro protocol. Exposes:
 - Low-level `Client` to send/receive raw `loro_protocol::ProtocolMessage`.
 - High-level `LoroWebsocketClient` that joins rooms and mirrors updates into a `loro::LoroDoc`, matching the TypeScript client behavior.
 
+> %ELO support is WIP: the Rust adaptor currently ships snapshot-only packaging for encrypted docs and APIs may change.
+
 ## Quick start
 
 ```rust
@@ -24,7 +26,7 @@ let _room = client.join_loro("room1", doc.clone()).await?;
 ## Features
 - Handles protocol keepalive (`"ping"/"pong"`) and filters control frames.
 - Automatic fragmentation/reassembly thresholds aligned with the server.
-- %ELO adaptor helpers to encrypt/decrypt containers alongside Loro.
+- %ELO adaptor helpers to encrypt/decrypt containers alongside Loro (experimental snapshot-only flow).
 
 ## Tests
 

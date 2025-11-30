@@ -262,4 +262,30 @@ mod tests {
             _ => panic!("wrong decoded type"),
         }
     }
+
+    #[test]
+    fn encode_rejects_room_id_over_limit() {
+        let long_room = "x".repeat(129);
+        let msg = ProtocolMessage::JoinRequest {
+            crdt: CrdtType::Loro,
+            room_id: long_room,
+            auth: vec![],
+            version: vec![],
+        };
+        let err = encode(&msg).unwrap_err();
+        assert!(err.contains("Room ID too long"));
+    }
+
+    #[test]
+    fn encode_rejects_payload_over_max_size() {
+        // Build an intentionally oversized payload (header + one giant update)
+        let big_update = vec![0u8; MAX_MESSAGE_SIZE + 1024];
+        let msg = ProtocolMessage::DocUpdate {
+            crdt: CrdtType::Loro,
+            room_id: "room-oversized".into(),
+            updates: vec![big_update],
+        };
+        let err = encode(&msg).unwrap_err();
+        assert!(err.contains("exceeds maximum"));
+    }
 }

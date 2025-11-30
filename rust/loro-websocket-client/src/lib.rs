@@ -193,10 +193,145 @@ impl Client {
 #[cfg(test)]
 mod tests {
     use super::*;
+
     #[test]
     fn client_error_display() {
         let e = ClientError::Protocol("bad".into());
         assert!(format!("{}", e).contains("protocol error"));
+    }
+
+    #[derive(Default)]
+    struct RecordingAdaptor {
+        updates: Arc<Mutex<Vec<Vec<u8>>>>,
+    }
+
+    #[async_trait::async_trait]
+    impl CrdtDocAdaptor for RecordingAdaptor {
+        fn crdt_type(&self) -> CrdtType {
+            CrdtType::Loro
+        }
+
+        async fn version(&self) -> Vec<u8> {
+            Vec::new()
+        }
+
+        async fn set_ctx(&mut self, _ctx: CrdtAdaptorContext) {}
+
+        async fn handle_join_ok(
+            &mut self,
+            _permission: protocol::Permission,
+            _version: Vec<u8>,
+        ) {
+        }
+
+        async fn apply_update(&mut self, updates: Vec<Vec<u8>>) {
+            self.updates.lock().await.extend(updates);
+        }
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn fragment_reassembly_delivers_updates_in_order() {
+        let (tx, _rx) = mpsc::unbounded_channel::<Message>();
+        let rooms = Arc::new(Mutex::new(HashMap::new()));
+        let pending = Arc::new(Mutex::new(HashMap::new()));
+        let adaptors = Arc::new(Mutex::new(HashMap::new()));
+        let pre_join_buf = Arc::new(Mutex::new(HashMap::new()));
+        let frag_batches = Arc::new(Mutex::new(HashMap::new()));
+        let config = Arc::new(ClientConfig::default());
+
+        let worker = ConnectionWorker::new(
+            tx,
+            rooms,
+            pending,
+            adaptors.clone(),
+            pre_join_buf,
+            frag_batches,
+            config,
+        );
+
+        let room_id = "room-frag".to_string();
+        let key = RoomKey {
+            crdt: CrdtType::Loro,
+            room: room_id.clone(),
+        };
+        let collected = Arc::new(Mutex::new(Vec::<Vec<u8>>::new()));
+        adaptors.lock().await.insert(
+            key.clone(),
+            Box::new(RecordingAdaptor {
+                updates: collected.clone(),
+            }),
+        );
+
+        let batch_id = protocol::BatchId([1, 2, 3, 4, 5, 6, 7, 8]);
+        worker
+            .handle_message(ProtocolMessage::DocUpdateFragmentHeader {
+                crdt: CrdtType::Loro,
+                room_id: room_id.clone(),
+                batch_id,
+                fragment_count: 2,
+                total_size_bytes: 10,
+            })
+            .await;
+        // Send fragments out of order to ensure slot ordering is respected
+        worker
+            .handle_message(ProtocolMessage::DocUpdateFragment {
+                crdt: CrdtType::Loro,
+                room_id: room_id.clone(),
+                batch_id,
+                index: 1,
+                fragment: b"world".to_vec(),
+            })
+            .await;
+        worker
+            .handle_message(ProtocolMessage::DocUpdateFragment {
+                crdt: CrdtType::Loro,
+                room_id,
+                batch_id,
+                index: 0,
+                fragment: b"hello".to_vec(),
+            })
+            .await;
+
+        let updates = collected.lock().await;
+        assert_eq!(updates.as_slice(), &[b"helloworld".to_vec()]);
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn elo_snapshot_container_roundtrips_plaintext() {
+        let doc = Arc::new(Mutex::new(LoroDoc::new()));
+        let key = [7u8; 32];
+        let adaptor = EloDocAdaptor::new(doc, "kid", key)
+            .with_iv_factory(Arc::new(|| [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]));
+        let plaintext = b"hello-elo".to_vec();
+
+        let container = adaptor.encode_elo_snapshot_container(&plaintext);
+        let records =
+            protocol::elo::decode_elo_container(&container).expect("container should decode");
+        assert_eq!(records.len(), 1);
+        let parsed =
+            protocol::elo::parse_elo_record_header(records[0]).expect("header should parse");
+        match parsed.header {
+            protocol::elo::EloHeader::Snapshot(hdr) => {
+                assert_eq!(hdr.key_id, "kid");
+                assert_eq!(hdr.iv, [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]);
+                let cipher = aes_gcm::Aes256Gcm::new_from_slice(&key).unwrap();
+                let decrypted = cipher
+                    .decrypt(
+                        aes_gcm::Nonce::from_slice(&hdr.iv),
+                        aes_gcm::aead::Payload {
+                            msg: parsed.ct,
+                            aad: parsed.aad,
+                        },
+                    )
+                    .unwrap();
+                assert_eq!(decrypted, plaintext);
+            }
+            _ => panic!("expected snapshot header"),
+        }
+        assert!(matches!(
+            parsed.kind,
+            protocol::elo::EloRecordKind::Snapshot
+        ));
     }
 }
 
@@ -1017,6 +1152,8 @@ impl Drop for LoroDocAdaptor {
 }
 
 // --- EloDocAdaptor: E2EE Loro (minimal snapshot-only packaging) ---
+/// Experimental %ELO adaptor. Snapshot-only packaging is implemented today;
+/// delta packaging and API stability are WIP and may change.
 pub struct EloDocAdaptor {
     doc: Arc<Mutex<LoroDoc>>,
     ctx: Option<CrdtAdaptorContext>,
@@ -1146,7 +1283,7 @@ impl CrdtDocAdaptor for EloDocAdaptor {
 
     async fn handle_join_ok(&mut self, _permission: protocol::Permission, _version: Vec<u8>) {
         // On join, send a full encrypted snapshot to establish baseline.
-        // TODO: REVIEW [elo-packaging]
+        // WIP: %ELO snapshot-only packaging; TODO: REVIEW [elo-packaging]
         // This minimal implementation uses snapshot-only packaging and empty VV.
         // It is correct but not optimal; consider delta packaging in a follow-up.
         if let Ok(snap) = self.doc.lock().await.export(loro::ExportMode::Snapshot) {

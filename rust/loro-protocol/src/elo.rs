@@ -3,6 +3,8 @@
 //! for container decode and plaintext header parsing. This module is intentionally
 //! crypto-free; consumers can use the parsed `aad` (exact header bytes) and `iv`
 //! with their own AES-GCM bindings if desired.
+//! NOTE: `%ELO` support on the Rust side is work-in-progress; only the container
+//! and header parsing surface is considered stable today.
 
 use crate::bytes::BytesReader;
 
@@ -144,4 +146,3 @@ fn compare_bytes(a: &[u8], b: &[u8]) -> i32 {
     }
     (a.len() as i32) - (b.len() as i32)
 }
-
