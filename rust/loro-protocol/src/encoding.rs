@@ -50,9 +50,12 @@ pub fn encode(message: &ProtocolMessage) -> Result<Vec<u8>, String> {
         | ProtocolMessage::JoinResponseOk { crdt, room_id, permission: _, version: _, extra: _ }
         | ProtocolMessage::JoinError { crdt, room_id, code: _, message: _, receiver_version: _, app_code: _ }
         | ProtocolMessage::DocUpdate { crdt, room_id, updates: _ }
+        | ProtocolMessage::DocUpdateV2 { crdt, room_id, batch_id: _, updates: _ }
         | ProtocolMessage::DocUpdateFragmentHeader { crdt, room_id, batch_id: _, fragment_count: _, total_size_bytes: _ }
         | ProtocolMessage::DocUpdateFragment { crdt, room_id, batch_id: _, index: _, fragment: _ }
         | ProtocolMessage::UpdateError { crdt, room_id, code: _, message: _, batch_id: _, app_code: _ }
+        | ProtocolMessage::Ack { crdt, room_id, batch_id: _ }
+        | ProtocolMessage::UpdateErrorV2 { crdt, room_id, batch_id: _, code: _, message: _, app_code: _ }
         | ProtocolMessage::Leave { crdt, room_id } => {
             let room_id_bytes = room_id.as_bytes();
             if room_id_bytes.len() > MAX_ROOM_ID_LENGTH { return Err("Room ID too long".into()); }
@@ -70,6 +73,9 @@ pub fn encode(message: &ProtocolMessage) -> Result<Vec<u8>, String> {
         ProtocolMessage::DocUpdateFragmentHeader { .. } => MessageType::DocUpdateFragmentHeader as u8,
         ProtocolMessage::DocUpdateFragment { .. } => MessageType::DocUpdateFragment as u8,
         ProtocolMessage::UpdateError { .. } => MessageType::UpdateError as u8,
+        ProtocolMessage::DocUpdateV2 { .. } => MessageType::DocUpdateV2 as u8,
+        ProtocolMessage::Ack { .. } => MessageType::Ack as u8,
+        ProtocolMessage::UpdateErrorV2 { .. } => MessageType::UpdateErrorV2 as u8,
         ProtocolMessage::Leave { .. } => MessageType::Leave as u8,
     };
     w.push_byte(ty);
@@ -99,6 +105,11 @@ pub fn encode(message: &ProtocolMessage) -> Result<Vec<u8>, String> {
             w.push_uleb128(updates.len() as u64);
             for u in updates { w.push_var_bytes(u); }
         }
+        ProtocolMessage::DocUpdateV2 { batch_id, updates, .. } => {
+            w.push_bytes(&batch_id.0);
+            w.push_uleb128(updates.len() as u64);
+            for u in updates { w.push_var_bytes(u); }
+        }
         ProtocolMessage::DocUpdateFragmentHeader { batch_id, fragment_count, total_size_bytes, .. } => {
             w.push_bytes(&batch_id.0);
             w.push_uleb128(*fragment_count);
@@ -115,6 +126,17 @@ pub fn encode(message: &ProtocolMessage) -> Result<Vec<u8>, String> {
             if matches!(code, UpdateErrorCode::FragmentTimeout) {
                 if let Some(id) = batch_id { w.push_bytes(&id.0); }
             }
+            if matches!(code, UpdateErrorCode::AppError) {
+                if let Some(app) = app_code { w.push_var_string(app); }
+            }
+        }
+        ProtocolMessage::Ack { batch_id, .. } => {
+            w.push_bytes(&batch_id.0);
+        }
+        ProtocolMessage::UpdateErrorV2 { batch_id, code, message, app_code, .. } => {
+            w.push_bytes(&batch_id.0);
+            w.push_byte(*code as u8);
+            w.push_var_string(message);
             if matches!(code, UpdateErrorCode::AppError) {
                 if let Some(app) = app_code { w.push_var_string(app); }
             }
@@ -179,6 +201,17 @@ pub fn decode(buf: &[u8]) -> Result<ProtocolMessage, String> {
             for _ in 0..count { updates.push(r.read_var_bytes()?.to_vec()); }
             PM::DocUpdate { crdt, room_id, updates }
         }
+        MessageType::DocUpdateV2 => {
+            if r.remaining() < 8 { return Err("Invalid DocUpdateV2: missing batch ID".into()); }
+            let id = r.read_bytes(8)?;
+            let mut arr = [0u8; 8];
+            arr.copy_from_slice(id);
+            let batch_id = BatchId(arr);
+            let count = r.read_uleb128()? as usize;
+            let mut updates = Vec::with_capacity(count);
+            for _ in 0..count { updates.push(r.read_var_bytes()?.to_vec()); }
+            PM::DocUpdateV2 { crdt, room_id, batch_id, updates }
+        }
         MessageType::DocUpdateFragmentHeader => {
             if r.remaining() < 8 { return Err("Invalid DocUpdateFragmentHeader: missing batch ID".into()); }
             let id = r.read_bytes(8)?;
@@ -214,6 +247,28 @@ pub fn decode(buf: &[u8]) -> Result<ProtocolMessage, String> {
                 if let Ok(app) = r.read_var_string() { app_code = Some(app); }
             }
             PM::UpdateError { crdt, room_id, code, message, batch_id, app_code }
+        }
+        MessageType::Ack => {
+            if r.remaining() < 8 { return Err("Invalid Ack: missing batch ID".into()); }
+            let id = r.read_bytes(8)?;
+            let mut arr = [0u8; 8];
+            arr.copy_from_slice(id);
+            let batch_id = BatchId(arr);
+            PM::Ack { crdt, room_id, batch_id }
+        }
+        MessageType::UpdateErrorV2 => {
+            if r.remaining() < 8 { return Err("Invalid UpdateErrorV2: missing batch ID".into()); }
+            let id = r.read_bytes(8)?;
+            let mut arr = [0u8; 8];
+            arr.copy_from_slice(id);
+            let batch_id = BatchId(arr);
+            let code = r.read_byte().ok().and_then(UpdateErrorCode::from_u8).unwrap_or(UpdateErrorCode::Unknown);
+            let message = r.read_var_string()?;
+            let mut app_code = None;
+            if matches!(code, UpdateErrorCode::AppError) && r.remaining() > 0 {
+                if let Ok(app) = r.read_var_string() { app_code = Some(app); }
+            }
+            PM::UpdateErrorV2 { crdt, room_id, batch_id, code, message, app_code }
         }
         MessageType::Leave => PM::Leave { crdt, room_id },
     };
@@ -280,9 +335,10 @@ mod tests {
     fn encode_rejects_payload_over_max_size() {
         // Build an intentionally oversized payload (header + one giant update)
         let big_update = vec![0u8; MAX_MESSAGE_SIZE + 1024];
-        let msg = ProtocolMessage::DocUpdate {
+        let msg = ProtocolMessage::DocUpdateV2 {
             crdt: CrdtType::Loro,
             room_id: "room-oversized".into(),
+            batch_id: BatchId([0; 8]),
             updates: vec![big_update],
         };
         let err = encode(&msg).unwrap_err();

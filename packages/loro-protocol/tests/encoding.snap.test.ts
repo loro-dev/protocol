@@ -9,10 +9,11 @@ import {
   type JoinRequest,
   type JoinResponseOk,
   type JoinError,
-  type DocUpdate,
+  type DocUpdateV2,
   type DocUpdateFragmentHeader,
   type DocUpdateFragment,
-  type UpdateError,
+  type UpdateErrorV2,
+  type Ack,
   type Leave,
 } from "../src/protocol";
 
@@ -90,11 +91,12 @@ describe("encoding snapshots", () => {
     expect(bytesToHex(encode(msg))).toMatchSnapshot();
   });
 
-  it("DocUpdate multiple updates", () => {
-    const msg: DocUpdate = {
-      type: MessageType.DocUpdate,
+  it("DocUpdateV2 multiple updates", () => {
+    const msg: DocUpdateV2 = {
+      type: MessageType.DocUpdateV2,
       crdt: CrdtType.Yjs,
       roomId,
+      batchId: "0x0a0b0c0d0e0f0001",
       updates: [
         new Uint8Array([1, 2, 3]),
         new Uint8Array([4, 5, 6, 7]),
@@ -130,34 +132,46 @@ describe("encoding snapshots", () => {
     expect(bytesToHex(encode(msg))).toMatchSnapshot();
   });
 
-  it("UpdateError permission denied", () => {
-    const msg: UpdateError = {
-      type: MessageType.UpdateError,
+  it("Ack", () => {
+    const msg: Ack = {
+      type: MessageType.Ack,
       crdt: CrdtType.Loro,
       roomId,
+      batchId: "0x0f0e0d0c0b0a0908",
+    };
+    expect(bytesToHex(encode(msg))).toMatchSnapshot();
+  });
+
+  it("UpdateErrorV2 permission denied", () => {
+    const msg: UpdateErrorV2 = {
+      type: MessageType.UpdateErrorV2,
+      crdt: CrdtType.Loro,
+      roomId,
+      batchId: "0x0100000000000000",
       code: UpdateErrorCode.PermissionDenied,
       message: "No write permission",
     };
     expect(bytesToHex(encode(msg))).toMatchSnapshot();
   });
 
-  it("UpdateError fragment timeout with batchId", () => {
-    const msg: UpdateError = {
-      type: MessageType.UpdateError,
+  it("UpdateErrorV2 fragment timeout", () => {
+    const msg: UpdateErrorV2 = {
+      type: MessageType.UpdateErrorV2,
       crdt: CrdtType.YjsAwareness,
       roomId,
+      batchId: "0x0100000000000000",
       code: UpdateErrorCode.FragmentTimeout,
       message: "Fragment timeout",
-      batchId: "0x0100000000000000",
     };
     expect(bytesToHex(encode(msg))).toMatchSnapshot();
   });
 
-  it("UpdateError app error with appCode", () => {
-    const msg: UpdateError = {
-      type: MessageType.UpdateError,
+  it("UpdateErrorV2 app error with appCode", () => {
+    const msg: UpdateErrorV2 = {
+      type: MessageType.UpdateErrorV2,
       crdt: CrdtType.Loro,
       roomId,
+      batchId: "0x0000000000000001",
       code: UpdateErrorCode.AppError,
       message: "Custom app error",
       appCode: "custom_code_123",

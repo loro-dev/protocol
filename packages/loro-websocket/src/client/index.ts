@@ -7,15 +7,19 @@ import {
   encode,
   JoinRequest,
   DocUpdate,
+  DocUpdateV2,
   JoinError,
   DocUpdateFragmentHeader,
   DocUpdateFragment,
+  Ack,
   UpdateError,
+  UpdateErrorV2,
   UpdateErrorCode,
   Leave,
   JoinErrorCode,
   MAX_MESSAGE_SIZE,
   bytesToHex,
+  type HexString,
 } from "loro-protocol";
 import type { CrdtDocAdaptor } from "loro-adaptors";
 
@@ -38,7 +42,7 @@ interface PendingRoom {
 
 interface InternalRoomHandler {
   handleDocUpdate(updates: Uint8Array[]): void;
-  handleUpdateError(error: UpdateError): void;
+  handleUpdateError(error: UpdateError | UpdateErrorV2): void;
 }
 
 interface ActiveRoom {
@@ -525,6 +529,21 @@ export class LoroWebsocketClient {
         }
         break;
       }
+      case MessageType.DocUpdateV2: {
+        const active = this.activeRooms.get(roomId);
+        if (active) {
+          active.handler.handleDocUpdate(msg.updates);
+        } else {
+          const pending = this.pendingRooms.get(roomId);
+          if (pending) {
+            const buf = this.preJoinUpdates.get(roomId) ?? [];
+            buf.push(...msg.updates);
+            this.preJoinUpdates.set(roomId, buf);
+          }
+        }
+        this.sendAck(msg.batchId, msg.crdt, msg.roomId);
+        break;
+      }
       case MessageType.DocUpdate: {
         const active = this.activeRooms.get(roomId);
         if (active) {
@@ -547,7 +566,8 @@ export class LoroWebsocketClient {
         this.handleFragment(msg);
         break;
       }
-      case MessageType.UpdateError: {
+      case MessageType.UpdateError:
+      case MessageType.UpdateErrorV2: {
         const active = this.activeRooms.get(roomId);
         if (active) {
           active.handler.handleUpdateError(msg);
@@ -557,6 +577,10 @@ export class LoroWebsocketClient {
             `Update error for room ${roomIdStr}: ${msg.code} - ${msg.message}`
           );
         }
+        break;
+      }
+      case MessageType.Ack: {
+        // Currently no explicit ack tracking on client; ignore.
         break;
       }
     }
@@ -576,19 +600,13 @@ export class LoroWebsocketClient {
     const timeoutId = setTimeout(() => {
       this.fragmentBatches.delete(batchKey);
       // Send timeout error
-      try {
-        if (this.ws && this.ws.readyState === WebSocket.OPEN) {
-          this.ws.send(
-            encode({
-              type: MessageType.UpdateError,
-              crdt: msg.crdt,
-              roomId: msg.roomId,
-              code: UpdateErrorCode.FragmentTimeout,
-              message: `Fragment reassembly timeout for batch ${msg.batchId}`,
-            } as UpdateError)
-          );
-        }
-      } catch {}
+      this.sendUpdateErrorV2(
+        msg.batchId,
+        msg.crdt,
+        msg.roomId,
+        UpdateErrorCode.FragmentTimeout,
+        `Fragment reassembly timeout for batch ${msg.batchId}`
+      );
     }, 10000);
 
     this.fragmentBatches.set(batchKey, {
@@ -605,6 +623,13 @@ export class LoroWebsocketClient {
 
     if (!batch) {
       console.error(`Received fragment for unknown batch ${msg.batchId}`);
+      this.sendUpdateErrorV2(
+        msg.batchId,
+        msg.crdt,
+        msg.roomId,
+        UpdateErrorCode.InvalidUpdate,
+        `Unknown fragment batch ${msg.batchId}`
+      );
       return;
     }
 
@@ -637,6 +662,7 @@ export class LoroWebsocketClient {
       if (active) {
         // Treat reassembled data as a single update
         active.handler.handleDocUpdate([reassembledData]);
+        this.sendAck(msg.batchId, msg.crdt, msg.roomId);
       } else {
         const pending = this.pendingRooms.get(id);
         if (pending) {
@@ -932,14 +958,16 @@ export class LoroWebsocketClient {
     );
 
     if (update.length <= FRAG_LIMIT) {
-      // Send as a single DocUpdate with one update entry
+      // Send as a single DocUpdateV2 with one update entry
+      const batchId = this.generateBatchId();
       ws.send(
         encode({
-          type: MessageType.DocUpdate,
+          type: MessageType.DocUpdateV2,
           crdt,
           roomId,
+          batchId,
           updates: [update],
-        } as DocUpdate)
+        } as DocUpdateV2)
       );
       return;
     }
@@ -986,6 +1014,46 @@ export class LoroWebsocketClient {
         roomId,
       } as Leave)
     );
+  }
+
+  private sendAck(batchId: HexString, crdt: CrdtType, roomId: string) {
+    if (!this.ws || this.ws.readyState !== WebSocket.OPEN) return;
+    try {
+      this.ws.send(
+        encode({
+          type: MessageType.Ack,
+          crdt,
+          roomId,
+          batchId,
+        } as Ack)
+      );
+    } catch (err) {
+      console.error("Failed to send ACK", err);
+    }
+  }
+
+  private sendUpdateErrorV2(
+    batchId: HexString,
+    crdt: CrdtType,
+    roomId: string,
+    code: UpdateErrorCode,
+    message: string
+  ) {
+    if (!this.ws || this.ws.readyState !== WebSocket.OPEN) return;
+    try {
+      this.ws.send(
+        encode({
+          type: MessageType.UpdateErrorV2,
+          crdt,
+          roomId,
+          batchId,
+          code,
+          message,
+        } as UpdateErrorV2)
+      );
+    } catch (err) {
+      console.error("Failed to send UpdateErrorV2", err);
+    }
   }
 
   /**
@@ -1147,6 +1215,18 @@ export class LoroWebsocketClient {
         w.reject(err);
       } catch {}
     }
+  }
+
+  private generateBatchId(): HexString {
+    const buf = new Uint8Array(8);
+    if (typeof crypto !== "undefined" && crypto.getRandomValues) {
+      crypto.getRandomValues(buf);
+    } else {
+      for (let i = 0; i < buf.length; i++) {
+        buf[i] = Math.floor(Math.random() * 256);
+      }
+    }
+    return bytesToHex(buf);
   }
 }
 

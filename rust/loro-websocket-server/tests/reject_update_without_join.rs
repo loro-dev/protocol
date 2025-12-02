@@ -1,6 +1,6 @@
 use loro_websocket_client::Client;
 use loro_websocket_server as server;
-use loro_websocket_server::protocol::{self as proto, CrdtType};
+use loro_websocket_server::protocol::{self as proto, BatchId, CrdtType};
 use std::sync::Arc;
 
 #[tokio::test(flavor = "current_thread")]
@@ -20,21 +20,25 @@ async fn reject_update_without_join() {
     let url = format!("ws://{}/ws1?token=secret", addr);
     let mut c = Client::connect(&url).await.unwrap();
 
-    // Send DocUpdate without a prior JoinRequest
-    let msg = proto::ProtocolMessage::DocUpdate {
+    // Send DocUpdateV2 without a prior JoinRequest
+    let msg = proto::ProtocolMessage::DocUpdateV2 {
         crdt: CrdtType::Loro,
         room_id: "room-no-join".to_string(),
+        batch_id: BatchId([9, 0, 0, 0, 0, 0, 0, 0]),
         updates: vec![vec![1, 2, 3]],
     };
     c.send(&msg).await.unwrap();
 
-    // Expect UpdateError.PermissionDenied
+    // Expect UpdateErrorV2.PermissionDenied
     let mut got_err = false;
     for _ in 0..3 {
-        if let Some(proto::ProtocolMessage::UpdateError { code, .. }) = c.next().await.unwrap() {
-            assert!(matches!(code, proto::UpdateErrorCode::PermissionDenied));
-            got_err = true;
-            break;
+        match c.next().await.unwrap() {
+            Some(proto::ProtocolMessage::UpdateErrorV2 { code, .. }) => {
+                assert!(matches!(code, proto::UpdateErrorCode::PermissionDenied));
+                got_err = true;
+                break;
+            }
+            _ => {}
         }
     }
     assert!(got_err, "did not receive UpdateError.PermissionDenied");

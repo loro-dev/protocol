@@ -94,15 +94,28 @@ fn snapshot_join_error_app_error() {
 }
 
 #[test]
-fn snapshot_doc_update_multiple() {
-    // exports[`encoding snapshots > DocUpdate multiple updates 1`]
-    let msg = ProtocolMessage::DocUpdate {
+fn snapshot_doc_update_v2_multiple() {
+    // exports[`encoding snapshots > DocUpdateV2 multiple updates 1`]
+    let msg = ProtocolMessage::DocUpdateV2 {
         crdt: CrdtType::Yjs,
         room_id: "room-1234".to_string(),
+        batch_id: BatchId::from_hex("0x0a0b0c0d0e0f0001").unwrap(),
         updates: vec![vec![1,2,3], vec![4,5,6,7], vec![8]],
     };
     let hex = to_hex(&encode(&msg).unwrap());
-    assert_eq!(hex, "0x25594a5309726f6f6d2d3132333403030301020304040506070108");
+    assert_eq!(hex, "0x25594a5309726f6f6d2d31323334080a0b0c0d0e0f0001030301020304040506070108");
+}
+
+#[test]
+fn snapshot_ack() {
+    // exports[`encoding snapshots > Ack 1`]
+    let msg = ProtocolMessage::Ack {
+        crdt: CrdtType::Loro,
+        room_id: "room-1234".to_string(),
+        batch_id: BatchId::from_hex("0x0f0e0d0c0b0a0908").unwrap(),
+    };
+    let hex = to_hex(&encode(&msg).unwrap());
+    assert_eq!(hex, "0x254c4f5209726f6f6d2d31323334090f0e0d0c0b0a0908");
 }
 
 #[test]
@@ -136,48 +149,48 @@ fn snapshot_fragment() {
 }
 
 #[test]
-fn snapshot_update_error_permission_denied() {
-    // exports[`encoding snapshots > UpdateError permission denied 1`]
-    let msg = ProtocolMessage::UpdateError {
+fn snapshot_update_error_v2_permission_denied() {
+    // exports[`encoding snapshots > UpdateErrorV2 permission denied 1`]
+    let msg = ProtocolMessage::UpdateErrorV2 {
         crdt: CrdtType::Loro,
         room_id: "room-1234".to_string(),
+        batch_id: BatchId([1,0,0,0,0,0,0,0]),
         code: UpdateErrorCode::PermissionDenied,
         message: "No write permission".into(),
-        batch_id: None,
         app_code: None,
     };
     let hex = to_hex(&encode(&msg).unwrap());
-    assert_eq!(hex, "0x254c4f5209726f6f6d2d313233340603134e6f207772697465207065726d697373696f6e");
+    assert_eq!(hex, "0x254c4f5209726f6f6d2d313233340a010000000000000003134e6f207772697465207065726d697373696f6e");
 }
 
 #[test]
-fn snapshot_update_error_fragment_timeout() {
-    // exports[`encoding snapshots > UpdateError fragment timeout with batchId 1`]
-    let msg = ProtocolMessage::UpdateError {
+fn snapshot_update_error_v2_fragment_timeout() {
+    // exports[`encoding snapshots > UpdateErrorV2 fragment timeout 1`]
+    let msg = ProtocolMessage::UpdateErrorV2 {
         crdt: CrdtType::YjsAwareness,
         room_id: "room-1234".to_string(),
+        batch_id: BatchId([1,0,0,0,0,0,0,0]),
         code: UpdateErrorCode::FragmentTimeout,
         message: "Fragment timeout".into(),
-        batch_id: Some(BatchId([1,0,0,0,0,0,0,0])),
         app_code: None,
     };
     let hex = to_hex(&encode(&msg).unwrap());
-    assert_eq!(hex, "0x2559415709726f6f6d2d31323334060710467261676d656e742074696d656f75740100000000000000");
+    assert_eq!(hex, "0x2559415709726f6f6d2d313233340a01000000000000000710467261676d656e742074696d656f7574");
 }
 
 #[test]
-fn snapshot_update_error_app_error() {
-    // exports[`encoding snapshots > UpdateError app error with appCode 1`]
-    let msg = ProtocolMessage::UpdateError {
+fn snapshot_update_error_v2_app_error() {
+    // exports[`encoding snapshots > UpdateErrorV2 app error with appCode 1`]
+    let msg = ProtocolMessage::UpdateErrorV2 {
         crdt: CrdtType::Loro,
         room_id: "room-1234".to_string(),
+        batch_id: BatchId([0,0,0,0,0,0,0,1]),
         code: UpdateErrorCode::AppError,
         message: "Custom app error".into(),
-        batch_id: None,
         app_code: Some("custom_code_123".into()),
     };
     let hex = to_hex(&encode(&msg).unwrap());
-    assert_eq!(hex, "0x254c4f5209726f6f6d2d31323334067f10437573746f6d20617070206572726f720f637573746f6d5f636f64655f313233");
+    assert_eq!(hex, "0x254c4f5209726f6f6d2d313233340a00000000000000017f10437573746f6d20617070206572726f720f637573746f6d5f636f64655f313233");
 }
 
 #[test]

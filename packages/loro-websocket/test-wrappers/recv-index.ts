@@ -43,9 +43,17 @@ async function main() {
         ok = true;
         console.log(`[wrapper] recv-index joined ok`);
       }
-      if (msg.type === MessageType.DocUpdate) {
+      if (msg.type === MessageType.DocUpdateV2) {
         console.log(
-          `[wrapper] recv-index received DocUpdate (${msg.updates.length})`
+          `[wrapper] recv-index received DocUpdateV2 (${msg.updates.length})`
+        );
+        ws.send(
+          encode({
+            type: MessageType.Ack,
+            crdt: msg.crdt,
+            roomId: msg.roomId,
+            batchId: msg.batchId,
+          })
         );
         clearTimeout(to);
         try {

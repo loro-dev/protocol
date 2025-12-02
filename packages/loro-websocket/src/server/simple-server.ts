@@ -11,7 +11,10 @@ import {
   JoinError,
   JoinErrorCode,
   DocUpdate,
+  DocUpdateV2,
   UpdateError,
+  UpdateErrorV2,
+  Ack,
   UpdateErrorCode,
   Leave,
   ProtocolMessage,
@@ -21,6 +24,7 @@ import {
   DocUpdateFragmentHeader,
   DocUpdateFragment,
   MAX_MESSAGE_SIZE,
+  bytesToHex,
 } from "loro-protocol";
 import {
   getServerAdaptorDescriptor,
@@ -65,6 +69,7 @@ interface ClientConnection {
       totalSize: number;
       received: number;
       header: DocUpdateFragmentHeader;
+      timeoutId: ReturnType<typeof setTimeout>;
     }
   >;
   permissions: Map<string, Permission>; // roomKey -> permission
@@ -80,6 +85,16 @@ export class SimpleServer {
 
   constructor(config: SimpleServerConfig) {
     this.config = config;
+  }
+
+  private generateBatchId(): HexString {
+    const buf = new Uint8Array(8);
+    if (typeof crypto !== "undefined" && crypto.getRandomValues) {
+      crypto.getRandomValues(buf);
+    } else {
+      for (let i = 0; i < buf.length; i++) buf[i] = Math.floor(Math.random() * 256);
+    }
+    return bytesToHex(buf);
   }
 
   start(): Promise<void> {
@@ -250,14 +265,24 @@ export class SimpleServer {
       case MessageType.JoinRequest:
         await this.handleJoinRequest(client, message);
         break;
+      case MessageType.DocUpdateV2:
+        await this.handleDocUpdateV2(client, message);
+        break;
       case MessageType.DocUpdate:
-        await this.handleDocUpdate(client, message);
+        // Legacy support
+        await this.handleDocUpdateLegacy(client, message);
         break;
       case MessageType.DocUpdateFragmentHeader:
         this.handleFragmentHeader(client, message);
         break;
       case MessageType.DocUpdateFragment:
         await this.handleFragment(client, message);
+        break;
+      case MessageType.Ack:
+      case MessageType.UpdateErrorV2:
+      case MessageType.UpdateError:
+      case MessageType.JoinError:
+        // Currently not tracked; could hook for delivery metrics
         break;
       case MessageType.Leave:
         this.handleLeave(client, message);
@@ -331,11 +356,12 @@ export class SimpleServer {
 
       if (shouldBackfill && joinResult.updates) {
         this.sendMessage(client.ws, {
-          type: MessageType.DocUpdate,
+          type: MessageType.DocUpdateV2,
           crdt: message.crdt,
           roomId: message.roomId,
-          updates: joinResult.updates
-        });
+          batchId: this.generateBatchId(),
+          updates: joinResult.updates,
+        } satisfies DocUpdateV2);
       }
     } catch (error) {
       this.sendJoinError(
@@ -347,53 +373,61 @@ export class SimpleServer {
     }
   }
 
-  private async handleDocUpdate(
+  private async handleDocUpdateLegacy(
     client: ClientConnection,
     message: DocUpdate
   ): Promise<void> {
+    const upgraded: DocUpdateV2 = {
+      type: MessageType.DocUpdateV2,
+      crdt: message.crdt,
+      roomId: message.roomId,
+      batchId: this.generateBatchId(),
+      updates: message.updates,
+    };
+    await this.handleDocUpdateV2(client, upgraded);
+  }
+
+  private async handleDocUpdateV2(
+    client: ClientConnection,
+    message: DocUpdateV2
+  ): Promise<void> {
     try {
-      // Guard: reject payloads that exceed max update size
-      // (Clients fragment large updates; this is a safety net.)
       const oversized = message.updates.some(u => u.length > MAX_MESSAGE_SIZE);
       if (oversized) {
-        const updateError: UpdateError = {
-          type: MessageType.UpdateError,
+        this.sendMessage(client.ws, {
+          type: MessageType.UpdateErrorV2,
           crdt: message.crdt,
           roomId: message.roomId,
+          batchId: message.batchId,
           code: UpdateErrorCode.PayloadTooLarge,
           message: `Update payload exceeds ${MAX_MESSAGE_SIZE} bytes`,
-        };
-        this.sendMessage(client.ws, updateError);
+        } satisfies UpdateErrorV2);
         return;
       }
 
       const roomKey = this.getRoomKey(message.roomId, message.crdt);
-
-      // Check if client has joined this room
       if (!client.rooms.has(roomKey)) {
-        const updateError: UpdateError = {
-          type: MessageType.UpdateError,
+        this.sendMessage(client.ws, {
+          type: MessageType.UpdateErrorV2,
           crdt: message.crdt,
           roomId: message.roomId,
+          batchId: message.batchId,
           code: UpdateErrorCode.PermissionDenied,
           message: "Must join room before sending updates",
-        };
-        this.sendMessage(client.ws, updateError);
+        } satisfies UpdateErrorV2);
         return;
       }
 
       const permission = client.permissions.get(roomKey);
-
-      // Check if client has write permission
       if (permission !== "write") {
-        const updateError: UpdateError = {
-          type: MessageType.UpdateError,
+        this.sendMessage(client.ws, {
+          type: MessageType.UpdateErrorV2,
           crdt: message.crdt,
           roomId: message.roomId,
+          batchId: message.batchId,
           code: UpdateErrorCode.PermissionDenied,
           message: "Write permission required to update document",
-        };
-        this.sendMessage(client.ws, updateError);
+        } satisfies UpdateErrorV2);
         return;
       }
 
@@ -409,47 +443,45 @@ export class SimpleServer {
         );
         roomDoc.data = newDocumentData;
       } catch (error) {
-        const updateError: UpdateError = {
-          type: MessageType.UpdateError,
+        this.sendMessage(client.ws, {
+          type: MessageType.UpdateErrorV2,
           crdt: message.crdt,
           roomId: message.roomId,
+          batchId: message.batchId,
           code: UpdateErrorCode.InvalidUpdate,
           message: error instanceof Error ? error.message : "Invalid update",
-        };
-        this.sendMessage(client.ws, updateError);
+        } satisfies UpdateErrorV2);
         return;
       }
-
 
       if (roomDoc.descriptor.shouldPersist) {
         roomDoc.dirty = true;
       }
 
-      const updatesForBroadcast = message.updates;
-      if (updatesForBroadcast.length > 0) {
-        const outgoing: DocUpdate = {
-          type: MessageType.DocUpdate,
-          crdt: message.crdt,
-          roomId: message.roomId,
-          updates: updatesForBroadcast,
-        };
+      this.sendMessage(client.ws, {
+        type: MessageType.Ack,
+        crdt: message.crdt,
+        roomId: message.roomId,
+        batchId: message.batchId,
+      } satisfies Ack);
+
+      if (message.updates.length > 0) {
         this.broadcastToRoom(
           message.roomId,
           message.crdt,
-          outgoing,
+          message,
           client
         );
       }
     } catch (error) {
-      console.error(error);
-      const updateError: UpdateError = {
-        type: MessageType.UpdateError,
+      this.sendMessage(client.ws, {
+        type: MessageType.UpdateErrorV2,
         crdt: message.crdt,
         roomId: message.roomId,
-        code: UpdateErrorCode.InvalidUpdate,
-        message: error instanceof Error ? error.message : "Invalid update",
-      };
-      this.sendMessage(client.ws, updateError);
+        batchId: message.batchId,
+        code: UpdateErrorCode.Unknown,
+        message: error instanceof Error ? error.message : "Unknown error",
+      } satisfies UpdateErrorV2);
     }
   }
 
@@ -461,10 +493,11 @@ export class SimpleServer {
 
     // Check if client has joined this room
     if (!client.rooms.has(roomKey)) {
-      const error: UpdateError = {
-        type: MessageType.UpdateError,
+      const error: UpdateErrorV2 = {
+        type: MessageType.UpdateErrorV2,
         crdt: message.crdt,
         roomId: message.roomId,
+        batchId: message.batchId,
         code: UpdateErrorCode.PermissionDenied,
         message: "Must join room before sending fragments",
       };
@@ -472,11 +505,25 @@ export class SimpleServer {
       return;
     }
 
+    const timeoutId = setTimeout(() => {
+      client.fragments.delete(message.batchId);
+      const error: UpdateErrorV2 = {
+        type: MessageType.UpdateErrorV2,
+        crdt: message.crdt,
+        roomId: message.roomId,
+        batchId: message.batchId,
+        code: UpdateErrorCode.FragmentTimeout,
+        message: "Fragment reassembly timeout",
+      };
+      this.sendMessage(client.ws, error);
+    }, 10000);
+
     client.fragments.set(message.batchId, {
       data: Array.from({ length: message.fragmentCount }),
       totalSize: message.totalSizeBytes,
       received: 0,
       header: message,
+      timeoutId,
     });
   }
 
@@ -486,13 +533,13 @@ export class SimpleServer {
   ): Promise<void> {
     const batch = client.fragments.get(message.batchId);
     if (!batch) {
-      const error: UpdateError = {
-        type: MessageType.UpdateError,
+      const error: UpdateErrorV2 = {
+        type: MessageType.UpdateErrorV2,
         crdt: message.crdt,
         roomId: message.roomId,
-        code: UpdateErrorCode.FragmentTimeout,
-        message: "Fragment batch not found",
         batchId: message.batchId,
+        code: UpdateErrorCode.InvalidUpdate,
+        message: "Fragment batch not found",
       };
       this.sendMessage(client.ws, error);
       return;
@@ -503,6 +550,7 @@ export class SimpleServer {
 
     // Check if all fragments received
     if (batch.received === batch.data.length) {
+      clearTimeout(batch.timeoutId);
       // Reconstruct the complete update
       const totalData = new Uint8Array(batch.totalSize);
       let offset = 0;
@@ -517,13 +565,13 @@ export class SimpleServer {
       // DocUpdate messages.
       const roomKey = this.getRoomKey(message.roomId, message.crdt);
       if (!client.rooms.has(roomKey)) {
-        const error: UpdateError = {
-          type: MessageType.UpdateError,
+        const error: UpdateErrorV2 = {
+          type: MessageType.UpdateErrorV2,
           crdt: message.crdt,
           roomId: message.roomId,
+          batchId: message.batchId,
           code: UpdateErrorCode.PermissionDenied,
           message: "Must join room before sending fragments",
-          batchId: message.batchId,
         };
         this.sendMessage(client.ws, error);
         return;
@@ -531,13 +579,13 @@ export class SimpleServer {
 
       const permission = client.permissions.get(roomKey);
       if (permission !== "write") {
-        const error: UpdateError = {
-          type: MessageType.UpdateError,
+        const error: UpdateErrorV2 = {
+          type: MessageType.UpdateErrorV2,
           crdt: message.crdt,
           roomId: message.roomId,
+          batchId: message.batchId,
           code: UpdateErrorCode.PermissionDenied,
           message: "Write permission required to update document",
-          batchId: message.batchId,
         };
         this.sendMessage(client.ws, error);
         client.fragments.delete(message.batchId);
@@ -556,10 +604,11 @@ export class SimpleServer {
         );
         roomDoc.data = newDocumentData;
       } catch (error) {
-        const updateError: UpdateError = {
-          type: MessageType.UpdateError,
+        const updateError: UpdateErrorV2 = {
+          type: MessageType.UpdateErrorV2,
           crdt: message.crdt,
           roomId: message.roomId,
+          batchId: message.batchId,
           code: UpdateErrorCode.InvalidUpdate,
           message: error instanceof Error ? error.message : "Invalid update",
         };
@@ -590,6 +639,14 @@ export class SimpleServer {
           this.sendMessage(ws, fragMsg);
         }
       });
+
+      // Ack sender to confirm receipt of the full batch
+      this.sendMessage(client.ws, {
+        type: MessageType.Ack,
+        crdt: message.crdt,
+        roomId: message.roomId,
+        batchId: message.batchId,
+      } satisfies Ack);
 
       client.fragments.delete(message.batchId);
     }

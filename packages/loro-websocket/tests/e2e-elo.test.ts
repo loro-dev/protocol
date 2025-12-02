@@ -183,12 +183,13 @@ describe("E2E: %ELO server validation and errors", () => {
     });
     const container = encodeEloContainer([rec]);
 
-    // Send DocUpdate
+    // Send DocUpdateV2
     ws.send(
       encode({
-        type: MessageType.DocUpdate,
+        type: MessageType.DocUpdateV2,
         crdt: "%ELO",
         roomId: "elo-bad",
+        batchId: "0x0000000000000001",
         updates: [container],
       } as any)
     );
@@ -224,9 +225,10 @@ describe("E2E: %ELO server validation and errors", () => {
     const container = encodeEloContainer([rec]);
     ws.send(
       encode({
-        type: MessageType.DocUpdate,
+        type: MessageType.DocUpdateV2,
         crdt: "%ELO",
         roomId: "elo-bad2",
+        batchId: "0x0000000000000002",
         updates: [container],
       } as any)
     );
@@ -254,9 +256,10 @@ describe("E2E: %ELO server validation and errors", () => {
     let threw = false;
     try {
       encode({
-        type: MessageType.DocUpdate,
+        type: MessageType.DocUpdateV2,
         crdt: "%ELO",
         roomId: "elo-big",
+        batchId: "0x0000000000000003",
         updates: [big],
       } as any);
     } catch (e) {
@@ -360,7 +363,7 @@ async function waitForJoinOk(ws: WebSocket): Promise<void> {
   });
 }
 
-async function waitForUpdateError(ws: WebSocket): Promise<UpdateError> {
+async function waitForUpdateError(ws: WebSocket): Promise<UpdateError | UpdateErrorV2> {
   return await new Promise((resolve, reject) => {
     const t = setTimeout(() => {
       reject(new Error("timeout"));
@@ -368,9 +371,12 @@ async function waitForUpdateError(ws: WebSocket): Promise<UpdateError> {
     ws.on("message", (data: unknown) => {
       try {
         const msg = tryDecodeMsg(data);
-        if (msg?.type === MessageType.UpdateError) {
+        if (
+          msg?.type === MessageType.UpdateError ||
+          msg?.type === MessageType.UpdateErrorV2
+        ) {
           clearTimeout(t);
-          resolve(msg);
+          resolve(msg as UpdateError | UpdateErrorV2);
         }
       } catch { }
     });

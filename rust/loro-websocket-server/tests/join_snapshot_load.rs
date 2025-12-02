@@ -45,18 +45,22 @@ async fn join_sends_snapshot_from_loader() {
     };
     c.send(&join).await.unwrap();
 
-    // Expect JoinResponseOk then DocUpdate carrying snapshot
-    // Skip until we see a DocUpdate
+    // Expect JoinResponseOk then DocUpdateV2 carrying snapshot
+    // Skip until we see a DocUpdateV2
     let mut got_snapshot = false;
     for _ in 0..3 {
-        if let Some(proto::ProtocolMessage::DocUpdate { updates, .. }) = c.next().await.unwrap() {
-            let doc = loro_crdt::LoroDoc::new();
-            for u in updates {
-                let _ = doc.import(&u);
+        match c.next().await.unwrap() {
+            Some(proto::ProtocolMessage::DocUpdateV2 { updates, .. }) => {
+                let doc = loro_crdt::LoroDoc::new();
+                for u in updates {
+                    let _ = doc.import(&u);
+                }
+                assert_eq!(doc.get_text("text").to_string(), "from-storage");
+                got_snapshot = true;
+                break;
             }
-            assert_eq!(doc.get_text("text").to_string(), "from-storage");
-            got_snapshot = true;
-            break;
+            // Skip other messages (Ack etc.)
+            _ => {}
         }
     }
     assert!(got_snapshot, "did not receive snapshot after join");

@@ -438,6 +438,30 @@ impl ConnectionWorker {
                 }
                 eprintln!("join error: {:?} - {}", code, message);
             }
+            ProtocolMessage::DocUpdateV2 {
+                batch_id, updates, ..
+            } => {
+                if let Some(adaptor) = self.adaptors.lock().await.get_mut(&key) {
+                    adaptor.apply_update(updates).await;
+                } else if let Some(state) = self.rooms.lock().await.get(&key) {
+                    let doc = state.doc.lock().await;
+                    for u in updates {
+                        let _ = doc.import(&u);
+                    }
+                } else {
+                    let mut buf = self.pre_join_buf.lock().await;
+                    buf.entry(key.clone()).or_default().extend(updates);
+                }
+                // Always acknowledge receipt
+                let ack = ProtocolMessage::Ack {
+                    crdt: key.crdt,
+                    room_id: key.room.clone(),
+                    batch_id,
+                };
+                if let Ok(data) = encode(&ack) {
+                    let _ = self.tx.send(Message::Binary(data.into()));
+                }
+            }
             ProtocolMessage::DocUpdate { updates, .. } => {
                 if let Some(adaptor) = self.adaptors.lock().await.get_mut(&key) {
                     adaptor.apply_update(updates).await;
@@ -480,15 +504,15 @@ impl ConnectionWorker {
                     sleep(timeout).await;
                     let mut m = batches.lock().await;
                     if m.remove(&(key_clone.clone(), batch_id)).is_some() {
-                        let err = ProtocolMessage::UpdateError {
+                        let err = ProtocolMessage::UpdateErrorV2 {
                             crdt: key_clone.crdt,
                             room_id: key_clone.room.clone(),
+                            batch_id,
                             code: protocol::UpdateErrorCode::FragmentTimeout,
                             message: format!(
                                 "Fragment reassembly timeout for batch {}",
                                 batch_id.to_hex()
                             ),
-                            batch_id: Some(batch_id),
                             app_code: None,
                         };
                         if let Ok(data) = encode(&err) {
@@ -517,6 +541,15 @@ impl ConnectionWorker {
                         }
                         map.remove(&(key.clone(), batch_id));
                         drop(map);
+                        // Acknowledge completion
+                        let ack = ProtocolMessage::Ack {
+                            crdt: key.crdt,
+                            room_id: key.room.clone(),
+                            batch_id,
+                        };
+                        if let Ok(data) = encode(&ack) {
+                            let _ = self.tx.send(Message::Binary(data.into()));
+                        }
                         if let Some(adaptor) = self.adaptors.lock().await.get_mut(&key) {
                             adaptor.apply_update(vec![reassembled]).await;
                         } else if let Some(state) = self.rooms.lock().await.get(&key) {
@@ -534,13 +567,15 @@ impl ConnectionWorker {
                     );
                 }
             }
-            ProtocolMessage::UpdateError { code, message, .. } => {
+            ProtocolMessage::UpdateErrorV2 { code, message, .. }
+            | ProtocolMessage::UpdateError { code, message, .. } => {
                 if let Some(adaptor) = self.adaptors.lock().await.get_mut(&key) {
                     adaptor.handle_update_error(code, &message).await;
                 } else {
                     eprintln!("update error (no adaptor): {:?} - {}", code, message);
                 }
             }
+            ProtocolMessage::Ack { .. } => {}
             ProtocolMessage::Leave { .. } | ProtocolMessage::JoinRequest { .. } => {}
         }
     }
@@ -712,14 +747,19 @@ impl LoroWebsocketClient {
             Ok(JoinOutcome::Ok { permission, .. }) => {
                 // Only subscribe to local updates if we have write permission
                 if matches!(permission, protocol::Permission::Write) {
+                    let batch_counter = self.next_batch_id.clone();
                     let tx2 = self.tx.clone();
                     let key2 = key.clone();
                     let sub = {
                         let guard = doc.lock().await;
                         guard.subscribe_local_update(Box::new(move |bytes| {
-                            let msg = ProtocolMessage::DocUpdate {
+                            let batch_id = protocol::BatchId(
+                                batch_counter.fetch_add(1, Ordering::Relaxed).to_be_bytes(),
+                            );
+                            let msg = ProtocolMessage::DocUpdateV2 {
                                 crdt: key2.crdt,
                                 room_id: key2.room.clone(),
+                                batch_id,
                                 updates: vec![bytes.clone()],
                             };
                             if let Ok(data) = encode(&msg) {
@@ -803,9 +843,12 @@ impl LoroWebsocketClient {
             );
 
             if upd.len() <= frag_limit {
-                let msg = ProtocolMessage::DocUpdate {
+                let batch_id =
+                    protocol::BatchId(batch_counter.fetch_add(1, Ordering::Relaxed).to_be_bytes());
+                let msg = ProtocolMessage::DocUpdateV2 {
                     crdt,
                     room_id: room_vec.clone(),
+                    batch_id,
                     updates: vec![upd],
                 };
                 if let Ok(data) = encode(&msg) {
@@ -866,12 +909,12 @@ impl LoroWebsocketClient {
         let room_vec3 = key.room.clone();
         let crdt3 = key.crdt;
         let on_import_error = move |err: String, _data: Vec<Vec<u8>>| {
-            let msg = ProtocolMessage::UpdateError {
+            let msg = ProtocolMessage::UpdateErrorV2 {
                 crdt: crdt3,
                 room_id: room_vec3.clone(),
+                batch_id: protocol::BatchId([0; 8]),
                 code: protocol::UpdateErrorCode::AppError,
                 message: err,
-                batch_id: None,
                 app_code: None,
             };
             if let Ok(data) = encode(&msg) {
@@ -1027,9 +1070,12 @@ fn msg_crdt(msg: &ProtocolMessage) -> CrdtType {
         | ProtocolMessage::JoinResponseOk { crdt, .. }
         | ProtocolMessage::JoinError { crdt, .. }
         | ProtocolMessage::DocUpdate { crdt, .. }
+        | ProtocolMessage::DocUpdateV2 { crdt, .. }
         | ProtocolMessage::DocUpdateFragmentHeader { crdt, .. }
         | ProtocolMessage::DocUpdateFragment { crdt, .. }
         | ProtocolMessage::UpdateError { crdt, .. }
+        | ProtocolMessage::UpdateErrorV2 { crdt, .. }
+        | ProtocolMessage::Ack { crdt, .. }
         | ProtocolMessage::Leave { crdt, .. } => *crdt,
     }
 }
@@ -1040,9 +1086,12 @@ fn msg_room_id(msg: &ProtocolMessage) -> String {
         | ProtocolMessage::JoinResponseOk { room_id, .. }
         | ProtocolMessage::JoinError { room_id, .. }
         | ProtocolMessage::DocUpdate { room_id, .. }
+        | ProtocolMessage::DocUpdateV2 { room_id, .. }
         | ProtocolMessage::DocUpdateFragmentHeader { room_id, .. }
         | ProtocolMessage::DocUpdateFragment { room_id, .. }
         | ProtocolMessage::UpdateError { room_id, .. }
+        | ProtocolMessage::UpdateErrorV2 { room_id, .. }
+        | ProtocolMessage::Ack { room_id, .. }
         | ProtocolMessage::Leave { room_id, .. } => room_id.clone(),
     }
 }

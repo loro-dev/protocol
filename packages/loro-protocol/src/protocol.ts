@@ -43,6 +43,9 @@ export const MessageType = {
   DocUpdateFragment: 0x05,
   UpdateError: 0x06,
   Leave: 0x07,
+  DocUpdateV2: 0x08,
+  Ack: 0x09,
+  UpdateErrorV2: 0x0a,
 } as const;
 export type MessageType = (typeof MessageType)[keyof typeof MessageType];
 
@@ -95,8 +98,15 @@ export interface JoinError extends MessageBase {
   appCode?: string;
 }
 
+/** @deprecated Legacy v0 update message. Use DocUpdateV2 (0x08) for protocol v1. */
 export interface DocUpdate extends MessageBase {
   type: typeof MessageType.DocUpdate;
+  updates: Uint8Array[];
+}
+
+export interface DocUpdateV2 extends MessageBase {
+  type: typeof MessageType.DocUpdateV2;
+  batchId: HexString;
   updates: Uint8Array[];
 }
 
@@ -115,11 +125,25 @@ export interface DocUpdateFragment extends MessageBase {
   fragment: Uint8Array;
 }
 
+export interface Ack extends MessageBase {
+  type: typeof MessageType.Ack;
+  batchId: HexString;
+}
+
+/** @deprecated Legacy v0 update error message. Use UpdateErrorV2 (0x0A) for protocol v1. */
 export interface UpdateError extends MessageBase {
   type: typeof MessageType.UpdateError;
   code: UpdateErrorCode;
   message: string;
   batchId?: HexString;
+  appCode?: string;
+}
+
+export interface UpdateErrorV2 extends MessageBase {
+  type: typeof MessageType.UpdateErrorV2;
+  batchId: HexString;
+  code: UpdateErrorCode;
+  message: string;
   appCode?: string;
 }
 
@@ -148,7 +172,10 @@ export type ProtocolMessage =
   | JoinResponseOk
   | JoinError
   | DocUpdate
+  | DocUpdateV2
   | DocUpdateFragmentHeader
   | DocUpdateFragment
   | UpdateError
+  | Ack
+  | UpdateErrorV2
   | Leave;

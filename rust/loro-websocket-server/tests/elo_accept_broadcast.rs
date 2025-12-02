@@ -76,28 +76,32 @@ async fn elo_accepts_join_and_broadcasts_updates() {
         "both clients should receive JoinResponseOk for %ELO"
     );
 
-    // Client 1 sends an opaque %ELO DocUpdate payload (container bytes are irrelevant to the server)
+    // Client 1 sends an opaque %ELO DocUpdateV2 payload (container bytes are irrelevant to the server)
     let opaque_update: Vec<u8> = vec![0xde, 0xad, 0xbe, 0xef];
-    let du = proto::ProtocolMessage::DocUpdate {
+    let du = proto::ProtocolMessage::DocUpdateV2 {
         crdt: CrdtType::Elo,
         room_id: room_id.clone(),
+        batch_id: proto::BatchId([7, 0, 0, 0, 0, 0, 0, 0]),
         updates: vec![opaque_update.clone()],
     };
     c1.send(&du).await.unwrap();
 
-    // Client 2 should receive the same DocUpdate (broadcasted unchanged)
+    // Client 2 should receive the same DocUpdateV2 (broadcasted unchanged)
     let mut got = None;
     for _ in 0..5 {
-        if let Some(proto::ProtocolMessage::DocUpdate {
-            crdt,
-            room_id: rid,
-            updates,
-        }) = c2.next().await.unwrap()
-        {
-            if matches!(crdt, CrdtType::Elo) && rid == room_id && updates.len() == 1 {
-                got = Some(updates[0].clone());
-                break;
+        match c2.next().await.unwrap() {
+            Some(proto::ProtocolMessage::DocUpdateV2 {
+                crdt,
+                room_id: rid,
+                updates,
+                ..
+            }) => {
+                if matches!(crdt, CrdtType::Elo) && rid == room_id && updates.len() == 1 {
+                    got = Some(updates[0].clone());
+                    break;
+                }
             }
+            _ => {}
         }
     }
     assert_eq!(

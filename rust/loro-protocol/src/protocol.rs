@@ -63,11 +63,16 @@ pub enum MessageType {
     JoinRequest = 0x00,
     JoinResponseOk = 0x01,
     JoinError = 0x02,
+    /// Deprecated legacy update; prefer DocUpdateV2 (0x08).
     DocUpdate = 0x03,
     DocUpdateFragmentHeader = 0x04,
     DocUpdateFragment = 0x05,
+    /// Deprecated legacy update error; prefer UpdateErrorV2 (0x0A).
     UpdateError = 0x06,
     Leave = 0x07,
+    DocUpdateV2 = 0x08,
+    Ack = 0x09,
+    UpdateErrorV2 = 0x0a,
 }
 
 impl MessageType {
@@ -81,6 +86,9 @@ impl MessageType {
             0x05 => MessageType::DocUpdateFragment,
             0x06 => MessageType::UpdateError,
             0x07 => MessageType::Leave,
+            0x08 => MessageType::DocUpdateV2,
+            0x09 => MessageType::Ack,
+            0x0a => MessageType::UpdateErrorV2,
             _ => return None,
         })
     }
@@ -196,6 +204,12 @@ pub enum ProtocolMessage {
         room_id: String,
         updates: Vec<Vec<u8>>,
     },
+    DocUpdateV2 {
+        crdt: CrdtType,
+        room_id: String,
+        batch_id: BatchId,
+        updates: Vec<Vec<u8>>,
+    },
     DocUpdateFragmentHeader {
         crdt: CrdtType,
         room_id: String,
@@ -216,6 +230,19 @@ pub enum ProtocolMessage {
         code: UpdateErrorCode,
         message: String,
         batch_id: Option<BatchId>,
+        app_code: Option<String>,
+    },
+    Ack {
+        crdt: CrdtType,
+        room_id: String,
+        batch_id: BatchId,
+    },
+    UpdateErrorV2 {
+        crdt: CrdtType,
+        room_id: String,
+        batch_id: BatchId,
+        code: UpdateErrorCode,
+        message: String,
         app_code: Option<String>,
     },
     Leave {

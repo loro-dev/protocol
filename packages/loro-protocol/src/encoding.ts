@@ -9,9 +9,12 @@ import {
   JoinResponseOk,
   JoinError,
   DocUpdate,
+  DocUpdateV2,
   DocUpdateFragmentHeader,
   DocUpdateFragment,
   UpdateError,
+  UpdateErrorV2,
+  Ack,
   Leave,
   MAX_MESSAGE_SIZE,
   hexToBytes,
@@ -53,7 +56,10 @@ function isMessageType(x: number): x is MessageType {
     x === MessageType.DocUpdateFragmentHeader ||
     x === MessageType.DocUpdateFragment ||
     x === MessageType.UpdateError ||
-    x === MessageType.Leave
+    x === MessageType.Leave ||
+    x === MessageType.DocUpdateV2 ||
+    x === MessageType.Ack ||
+    x === MessageType.UpdateErrorV2
   );
 }
 
@@ -134,6 +140,15 @@ export function encode(message: ProtocolMessage): Uint8Array {
       }
       break;
     }
+    case MessageType.DocUpdateV2: {
+      const batchIdBytes = hexToBytes(message.batchId);
+      writer.pushBytes(batchIdBytes);
+      writer.pushUleb128(message.updates.length);
+      for (const update of message.updates) {
+        writer.pushVarBytes(update);
+      }
+      break;
+    }
     case MessageType.DocUpdateFragmentHeader: {
       // Write 8-byte batch ID
       const batchIdBytes = hexToBytes(message.batchId);
@@ -160,6 +175,21 @@ export function encode(message: ProtocolMessage): Uint8Array {
         const batchIdBytes = hexToBytes(message.batchId);
         writer.pushBytes(batchIdBytes);
       }
+      if (message.code === UpdateErrorCode.AppError && message.appCode) {
+        writer.pushVarString(message.appCode);
+      }
+      break;
+    }
+    case MessageType.Ack: {
+      const batchIdBytes = hexToBytes(message.batchId);
+      writer.pushBytes(batchIdBytes);
+      break;
+    }
+    case MessageType.UpdateErrorV2: {
+      const batchIdBytes = hexToBytes(message.batchId);
+      writer.pushBytes(batchIdBytes);
+      writer.pushByte(message.code);
+      writer.pushVarString(message.message);
       if (message.code === UpdateErrorCode.AppError && message.appCode) {
         writer.pushVarString(message.appCode);
       }
@@ -281,6 +311,25 @@ export function decode(data: Uint8Array): ProtocolMessage {
         updates,
       } as DocUpdate;
     }
+    case MessageType.DocUpdateV2: {
+      if (reader.remaining < 8) {
+        throw new Error("Invalid DocUpdateV2: missing batch ID");
+      }
+      const batchIdBytes = reader.readBytes(8);
+      const batchId = bytesToHex(batchIdBytes);
+      const count = reader.readUleb128();
+      const updates: Uint8Array[] = [];
+      for (let i = 0; i < count; i++) {
+        updates.push(reader.readVarBytes());
+      }
+      return {
+        type,
+        crdt,
+        roomId,
+        batchId,
+        updates,
+      } as DocUpdateV2;
+    }
     case MessageType.DocUpdateFragmentHeader: {
       if (reader.remaining < 8) {
         throw new Error("Invalid DocUpdateFragmentHeader: missing batch ID");
@@ -341,6 +390,44 @@ export function decode(data: Uint8Array): ProtocolMessage {
         batchId,
         appCode,
       } as UpdateError;
+    }
+    case MessageType.Ack: {
+      if (reader.remaining < 8) {
+        throw new Error("Invalid Ack: missing batch ID");
+      }
+      const batchIdBytes = reader.readBytes(8);
+      const batchId = bytesToHex(batchIdBytes);
+      return {
+        type,
+        crdt,
+        roomId,
+        batchId,
+      } as Ack;
+    }
+    case MessageType.UpdateErrorV2: {
+      if (reader.remaining < 8) {
+        throw new Error("Invalid UpdateErrorV2: missing batch ID");
+      }
+      const batchIdBytes = reader.readBytes(8);
+      const batchId = bytesToHex(batchIdBytes);
+      const codeByte = reader.readByte();
+      const code = isUpdateErrorCode(codeByte)
+        ? codeByte
+        : UpdateErrorCode.Unknown;
+      const message = reader.readVarString();
+      let appCode: string | undefined;
+      if (code === UpdateErrorCode.AppError && reader.remaining > 0) {
+        appCode = reader.readVarString();
+      }
+      return {
+        type,
+        crdt,
+        roomId,
+        batchId,
+        code,
+        message,
+        appCode,
+      } as UpdateErrorV2;
     }
     case MessageType.Leave: {
       return {
