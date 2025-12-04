@@ -86,10 +86,31 @@ export interface LoroWebsocketClientOptions {
   url: string;
   /** Optional custom ping interval. Defaults to 30s. Set with `disablePing` to stop timers. */
   pingIntervalMs?: number;
+  /** Ping timeout; after two consecutive misses the client will force-close and reconnect. Defaults to 10s. */
+  pingTimeoutMs?: number;
   /** Disable periodic ping/pong entirely. */
   disablePing?: boolean;
   /** Optional callback for low-level ws close (before status transitions). */
   onWsClose?: () => void;
+  /**
+   * Reconnect policy (kept minimal).
+   * - enabled: toggle auto-retry (default true)
+   * - initialDelayMs: starting backoff delay (default 500)
+   * - maxDelayMs: max backoff delay (default 15000)
+   * - jitter: 0-1 multiplier applied randomly around the delay (default 0.25)
+   * - maxAttempts: number | "infinite" (default "infinite")
+   * - fatalCloseCodes: close codes that should not retry (default 4400-4499, 1008, 1011)
+   * - fatalCloseReasons: close reasons that should not retry (default permission_changed, room_closed, auth_failed)
+   */
+  reconnect?: {
+    enabled?: boolean;
+    initialDelayMs?: number;
+    maxDelayMs?: number;
+    jitter?: number;
+    maxAttempts?: number | "infinite";
+    fatalCloseCodes?: number[];
+    fatalCloseReasons?: string[];
+  };
 }
 
 /**
@@ -132,12 +153,18 @@ export class LoroWebsocketClient {
     reject: (err: Error) => void;
     timeoutId: ReturnType<typeof setTimeout>;
   }> = [];
+  private missedPongs = 0;
 
   // Reconnect controls
   private shouldReconnect = true;
   private reconnectAttempts = 0;
   private reconnectTimer?: ReturnType<typeof setTimeout>;
   private removeNetworkListeners?: () => void;
+  private offline = false;
+
+  // Join requests issued while socket is still connecting
+  private queuedJoins: Uint8Array[] = [];
+  private readonly maxQueuedJoins = 50;
 
   constructor(private ops: LoroWebsocketClientOptions) {
     this.attachNetworkListeners();
@@ -274,7 +301,10 @@ export class LoroWebsocketClient {
   }
 
   /** Initiate or resume connection. Resolves when `Connected`. */
-  async connect(): Promise<void> {
+  async connect(opts?: { resetBackoff?: boolean }): Promise<void> {
+    if (opts?.resetBackoff) {
+      this.reconnectAttempts = 0;
+    }
     // Ensure future unexpected closes will auto-reconnect again
     this.shouldReconnect = true;
     const current = this.ws;
@@ -349,6 +379,8 @@ export class LoroWebsocketClient {
     this.resolveConnected?.();
     // Rejoin rooms after reconnect
     this.rejoinActiveRooms();
+    // Flush any queued joins that were requested while connecting
+    this.flushQueuedJoins();
   }
 
   private onSocketError(ws: WebSocket, _event: Event): void {
@@ -366,16 +398,14 @@ export class LoroWebsocketClient {
     }
 
     const closeCode = event?.code;
-    if (closeCode != null && closeCode >= 4400 && closeCode < 4500) {
-      this.shouldReconnect = false;
-    }
-
     const closeReason = event?.reason;
-    if (closeReason === "permission_changed" || closeReason === "room_closed") {
+
+    if (this.isFatalClose(closeCode, closeReason)) {
       this.shouldReconnect = false;
     }
 
     this.clearPingTimer();
+    this.missedPongs = 0;
     // Clear any pending fragment reassembly timers to avoid late callbacks
     if (this.fragmentBatches.size) {
       for (const [, batch] of this.fragmentBatches) {
@@ -389,6 +419,15 @@ export class LoroWebsocketClient {
     this.awaitingPongSince = undefined;
     this.ops.onWsClose?.();
     this.rejectAllPingWaiters(new Error("WebSocket closed"));
+    const maxAttempts = this.getReconnectPolicy().maxAttempts;
+    if (
+      typeof maxAttempts === "number" &&
+      maxAttempts > 0 &&
+      this.reconnectAttempts >= maxAttempts
+    ) {
+      this.shouldReconnect = false;
+    }
+
     if (!this.shouldReconnect) {
       this.setStatus(ClientStatus.Disconnected);
       this.rejectConnected?.(new Error("Disconnected"));
@@ -426,10 +465,11 @@ export class LoroWebsocketClient {
 
   private scheduleReconnect(immediate = false) {
     if (this.reconnectTimer) return;
+    if (this.offline) return;
+    const policy = this.getReconnectPolicy();
+    if (policy.enabled === false) return;
     const attempt = ++this.reconnectAttempts;
-    const base = 500; // ms
-    const max = 15_000; // ms
-    const delay = immediate ? 0 : Math.min(max, base * 2 ** (attempt - 1));
+    const delay = immediate ? 0 : this.computeBackoffDelay(attempt);
     this.reconnectTimer = setTimeout(() => {
       this.reconnectTimer = undefined;
       void this.connect();
@@ -442,6 +482,7 @@ export class LoroWebsocketClient {
   }
 
   private handleOnline = () => {
+    this.offline = false;
     if (!this.shouldReconnect) return;
     if (this.status === ClientStatus.Connected) return;
     this.clearReconnectTimer();
@@ -449,6 +490,7 @@ export class LoroWebsocketClient {
   };
 
   private handleOffline = () => {
+    this.offline = true;
     // Pause scheduled retries until online
     this.clearReconnectTimer();
     if (this.shouldReconnect) {
@@ -868,15 +910,21 @@ export class LoroWebsocketClient {
     });
     this.roomAuth.set(id, auth);
 
-    this.ws.send(
-      encode({
-        type: MessageType.JoinRequest,
-        crdt: crdtAdaptor.crdtType,
-        roomId,
-        auth: auth ?? new Uint8Array(),
-        version: crdtAdaptor.getVersion(),
-      } as JoinRequest)
-    );
+    const joinPayload = encode({
+      type: MessageType.JoinRequest,
+      crdt: crdtAdaptor.crdtType,
+      roomId,
+      auth: auth ?? new Uint8Array(),
+      version: crdtAdaptor.getVersion(),
+    } as JoinRequest);
+
+    if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+      this.ws.send(joinPayload);
+    } else {
+      this.enqueueJoin(joinPayload);
+      // ensure a connection attempt is running
+      void this.connect();
+    }
 
     return room;
   }
@@ -907,6 +955,7 @@ export class LoroWebsocketClient {
     if (ws && this.socketListeners.has(ws)) {
       this.ops.onWsClose?.();
     }
+    this.queuedJoins = [];
     this.detachSocketListeners(ws);
     this.flushAndCloseWebSocket(ws, {
       code: 1000,
@@ -1014,6 +1063,7 @@ export class LoroWebsocketClient {
     if (ws && this.socketListeners.has(ws)) {
       this.ops.onWsClose?.();
     }
+    this.queuedJoins = [];
     this.detachSocketListeners(ws);
     try {
       this.removeNetworkListeners?.();
@@ -1098,6 +1148,21 @@ export class LoroWebsocketClient {
     if (!interval) return;
     this.clearPingTimer();
     this.pingTimer = setInterval(() => {
+      const now = Date.now();
+      const timeoutMs = Math.max(1, this.ops.pingTimeoutMs ?? 10_000);
+      if (
+        this.awaitingPongSince != null &&
+        now - this.awaitingPongSince > timeoutMs
+      ) {
+        this.missedPongs += 1;
+        this.awaitingPongSince = now;
+        if (this.missedPongs >= 2) {
+          try {
+            this.ws?.close(1001, "ping_timeout");
+          } catch {}
+          return;
+        }
+      }
       try {
         if (this.ws && this.ws.readyState === WebSocket.OPEN) {
           // Avoid overlapping RTT probes
@@ -1132,6 +1197,7 @@ export class LoroWebsocketClient {
       }
       this.awaitingPongSince = undefined;
     }
+    this.missedPongs = 0;
     // Resolve all waiters on any pong
     if (this.pingWaiters.length > 0) {
       const waiters = this.pingWaiters.splice(0, this.pingWaiters.length);
@@ -1146,6 +1212,74 @@ export class LoroWebsocketClient {
         clearTimeout(w.timeoutId);
         w.reject(err);
       } catch {}
+    }
+  }
+
+  /** Manual reconnect helper that resets backoff and attempts immediately. */
+  retryNow(): Promise<void> {
+    return this.connect({ resetBackoff: true });
+  }
+
+  private getReconnectPolicy() {
+    const p = this.ops.reconnect ?? {};
+    return {
+      enabled: p.enabled ?? true,
+      initialDelayMs: Math.max(1, p.initialDelayMs ?? 500),
+      maxDelayMs: Math.max(1, p.maxDelayMs ?? 15_000),
+      jitter: Math.max(0, Math.min(1, p.jitter ?? 0.25)),
+      maxAttempts: p.maxAttempts ?? "infinite",
+      fatalCloseCodes: p.fatalCloseCodes ?? [
+        1008,
+        1011,
+        // 4400-4499
+        ...Array.from({ length: 100 }, (_, i) => 4400 + i),
+      ],
+      fatalCloseReasons: p.fatalCloseReasons ?? [
+        "permission_changed",
+        "room_closed",
+        "auth_failed",
+      ],
+    };
+  }
+
+  private computeBackoffDelay(attempt: number): number {
+    const policy = this.getReconnectPolicy();
+    const base = policy.initialDelayMs;
+    const max = policy.maxDelayMs;
+    const raw = base * 2 ** Math.max(0, attempt - 1);
+    const jitterFactor =
+      1 +
+      (policy.jitter === 0
+        ? 0
+        : (Math.random() * 2 - 1) * policy.jitter);
+    const withJitter = raw * jitterFactor;
+    return Math.min(max, Math.max(0, Math.floor(withJitter)));
+  }
+
+  private isFatalClose(code?: number, reason?: string): boolean {
+    const policy = this.getReconnectPolicy();
+    if (code != null && policy.fatalCloseCodes.includes(code)) return true;
+    if (reason && policy.fatalCloseReasons.includes(reason)) return true;
+    return false;
+  }
+
+  private enqueueJoin(payload: Uint8Array) {
+    if (this.queuedJoins.length >= this.maxQueuedJoins) {
+      throw new Error("Too many pending joins; connection not ready");
+    }
+    this.queuedJoins.push(payload);
+  }
+
+  private flushQueuedJoins() {
+    if (!this.ws || this.ws.readyState !== WebSocket.OPEN) return;
+    if (!this.queuedJoins.length) return;
+    const items = this.queuedJoins.splice(0, this.queuedJoins.length);
+    for (const payload of items) {
+      try {
+        this.ws.send(payload);
+      } catch (e) {
+        console.error("Failed to flush queued join:", e);
+      }
     }
   }
 }

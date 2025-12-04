@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
-import { WebSocket } from "ws";
+import { WebSocket, WebSocketServer } from "ws";
 import getPort from "get-port";
 import { SimpleServer } from "../src/server/simple-server";
 import { LoroWebsocketClient, ClientStatus } from "../src/client";
@@ -357,13 +357,12 @@ describe("E2E: Client-Server Sync", () => {
       unsubscribe2 = client2.onStatusChange(s => statuses2.push(s));
 
       await Promise.all([client1.waitConnected(), client2.waitConnected()]);
-      const initialConnectedCount1 = statuses1.filter(
+      const initialConnected1 = statuses1.filter(
         s => s === ClientStatus.Connected
       ).length;
-      const initialConnectedCount2 = statuses2.filter(
+      const initialConnected2 = statuses2.filter(
         s => s === ClientStatus.Connected
       ).length;
-
       const adaptor1 = new LoroAdaptor();
       const adaptor2 = new LoroAdaptor();
 
@@ -408,9 +407,9 @@ describe("E2E: Client-Server Sync", () => {
       await waitUntil(
         () =>
           statuses1.filter(s => s === ClientStatus.Connected).length >
-          initialConnectedCount1 &&
+            initialConnected1 &&
           statuses2.filter(s => s === ClientStatus.Connected).length >
-          initialConnectedCount2,
+            initialConnected2,
         5000,
         25
       );
@@ -484,24 +483,19 @@ describe("E2E: Client-Server Sync", () => {
       await new Promise(resolve => setTimeout(resolve, 200));
       await server.start();
 
+      // Without an online event, auto-retry should stay paused
+      await new Promise(resolve => setTimeout(resolve, 400));
+      expect(statuses1[statuses1.length - 1]).toBe(ClientStatus.Disconnected);
+      expect(statuses2[statuses2.length - 1]).toBe(ClientStatus.Disconnected);
+
+      // Manual retry should override the pause
+      await Promise.all([client1.retryNow(), client2.retryNow()]);
       await waitUntil(
         () =>
           client1!.getStatus() === ClientStatus.Connected &&
           client2!.getStatus() === ClientStatus.Connected,
         10000,
         50
-      );
-
-      expect((navigator as { onLine?: boolean }).onLine).toBe(false);
-
-      await waitUntil(
-        () =>
-          statuses1.filter(s => s === ClientStatus.Connected).length >
-          initialConnectedCount1 &&
-          statuses2.filter(s => s === ClientStatus.Connected).length >
-          initialConnectedCount2,
-        5000,
-        25
       );
 
       text1.insert(text1.length, " rebound");
@@ -565,6 +559,140 @@ describe("E2E: Client-Server Sync", () => {
 
     client.destroy();
   }, 15000);
+
+  it("stops auto-retry after fatal close code and retryNow reconnects", async () => {
+    const fatalPort = await getPort();
+    const wss = new WebSocketServer({ port: fatalPort });
+    let connections = 0;
+    wss.on("connection", ws => {
+      connections++;
+      const connId = connections;
+      ws.on("message", data => {
+        const text = data.toString();
+        if (text === "ping") {
+          // Only respond for non-fatal connections
+          if (connId >= 2) {
+            ws.send("pong");
+          }
+        }
+      });
+      if (connId === 1) {
+        setTimeout(() => {
+          try {
+            ws.close(1008, "policy");
+          } catch {}
+        }, 30);
+      }
+    });
+
+    const client = new LoroWebsocketClient({
+      url: `ws://localhost:${fatalPort}`,
+      pingIntervalMs: 50,
+      pingTimeoutMs: 200,
+    });
+    const statuses: string[] = [];
+    const off = client.onStatusChange(s => statuses.push(s));
+
+    await client.waitConnected();
+    await waitUntil(
+      () => statuses.includes(ClientStatus.Disconnected),
+      4000,
+      25
+    );
+
+    // Ensure it does not auto-retry after fatal close
+    const lenAfterFatal = statuses.length;
+    await new Promise(resolve => setTimeout(resolve, 400));
+    expect(statuses.length).toBe(lenAfterFatal);
+    expect(statuses[statuses.length - 1]).toBe(ClientStatus.Disconnected);
+
+    // Manual retry should reconnect
+    await client.retryNow();
+    await waitUntil(
+      () => client.getStatus() === ClientStatus.Connected,
+      4000,
+      25
+    );
+
+    off();
+    client.destroy();
+    wss.close();
+  }, 10000);
+
+  it("queues joins issued while connecting and flushes once connected", async () => {
+    const queuedPort = await getPort();
+    const client = new LoroWebsocketClient({
+      url: `ws://localhost:${queuedPort}`,
+      pingIntervalMs: 200, // slow ping to avoid noise before server up
+    });
+    const adaptor = new LoroAdaptor();
+
+    const joinPromise = client.join({
+      roomId: "queued-join",
+      crdtAdaptor: adaptor,
+    });
+
+    // Start server after join was requested
+    await new Promise(resolve => setTimeout(resolve, 200));
+    const server = new SimpleServer({ port: queuedPort });
+    await server.start();
+
+    const room = await joinPromise;
+    const text = adaptor.getDoc().getText("q");
+    text.insert(0, "hello");
+    adaptor.getDoc().commit();
+    await room.waitForReachingServerVersion();
+
+    await room.destroy();
+    client.destroy();
+    await server.stop();
+  }, 12000);
+
+  it("forces reconnect after ping timeout and recovers when pongs return", async () => {
+    const pongPort = await getPort();
+    const wss = new WebSocketServer({ port: pongPort });
+    let connId = 0;
+    wss.on("connection", ws => {
+      const id = ++connId;
+      ws.on("message", data => {
+        const text = data.toString();
+        if (text === "ping") {
+          if (id >= 2) ws.send("pong");
+          // first connection intentionally ignores to trigger timeout
+        }
+      });
+    });
+
+    const statuses: string[] = [];
+    const client = new LoroWebsocketClient({
+      url: `ws://localhost:${pongPort}`,
+      pingIntervalMs: 80,
+      pingTimeoutMs: 100,
+      reconnect: { initialDelayMs: 50, maxDelayMs: 200, jitter: 0 },
+    });
+    client.onStatusChange(s => statuses.push(s));
+
+    await client.waitConnected();
+    await waitUntil(
+      () => statuses.includes(ClientStatus.Disconnected),
+      5000,
+      25
+    );
+    await waitUntil(
+      () =>
+        statuses.filter(s => s === ClientStatus.Connected).length >= 2 &&
+        connId >= 2,
+      6000,
+      25
+    );
+
+    // Stay connected for a short window to ensure stability
+    await new Promise(resolve => setTimeout(resolve, 200));
+    expect(client.getStatus()).toBe(ClientStatus.Connected);
+
+    client.destroy();
+    wss.close();
+  }, 12000);
 });
 
 function installMockWindow(initialOnline = true) {
