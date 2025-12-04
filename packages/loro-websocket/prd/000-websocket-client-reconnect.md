@@ -50,6 +50,21 @@
 5) **Manual reconnect**
    - Add `retryNow()` (alias `connect({ resetBackoff: true })`) to attempt immediately and reset backoff. Also re-enables auto-retry if it had stopped.
 
+6) **Room rejoin resilience**
+   - Keep an `activeRooms` registry (roomId + crdt) for rooms that were successfully joined.
+   - On reconnect, automatically resend JoinRequest for every active room; include original auth bytes.
+   - If rejoin fails (fatal join error), emit a rejoin failure event and leave the room unjoined; caller can decide to retry or surface UI.
+   - Pending joins (issued while CONNECTING) remain queued and flush on OPEN; successful joins add to `activeRooms`.
+
+7) **Per-room status callbacks**
+   - `join` accepts `onStatusChange?: (status) => void` where status ∈ `connecting | joined | reconnecting | disconnected | error`.
+   - Transitions:
+     - `connecting`: initial join or queued join flushing.
+     - `joined`: join/rejoin success.
+     - `reconnecting`: socket closed unexpectedly and room queued for auto-rejoin.
+     - `disconnected`: reconnects disabled (fatal close/maxAttempts/close()).
+     - `error`: join/rejoin failure (e.g., auth denied); room is removed from active set so callers can rejoin manually.
+
 ## UX / API Back‑Compat
 - Defaults mimic today’s timing and infinite retries; jitter and fatal code handling are additive improvements.
 - Existing `onStatusChange` continues to work; new states (`reconnecting`) will be documented but won’t break existing string comparisons (add to `ClientStatus` map).

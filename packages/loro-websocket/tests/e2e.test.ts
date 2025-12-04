@@ -308,8 +308,18 @@ describe("E2E: Client-Server Sync", () => {
     const adaptor1 = new LoroAdaptor();
     const adaptor2 = new LoroAdaptor();
 
-    await client1.join({ roomId: "rejoin-room", crdtAdaptor: adaptor1 });
-    await client2.join({ roomId: "rejoin-room", crdtAdaptor: adaptor2 });
+    const statusLog: Array<{ client: number; status: string }> = [];
+
+    await client1.join({
+      roomId: "rejoin-room",
+      crdtAdaptor: adaptor1,
+      onStatusChange: s => statusLog.push({ client: 1, status: s }),
+    });
+    await client2.join({
+      roomId: "rejoin-room",
+      crdtAdaptor: adaptor2,
+      onStatusChange: s => statusLog.push({ client: 2, status: s }),
+    });
 
     // Stop server so both clients disconnect and attempt to reconnect
     await server.stop();
@@ -336,6 +346,9 @@ describe("E2E: Client-Server Sync", () => {
       3000,
       50
     );
+
+    expect(statusLog.some(e => e.status === "reconnecting")).toBe(true);
+    expect(statusLog.some(e => e.status === "joined")).toBe(true);
 
     client1.destroy();
     client2.destroy();
@@ -511,6 +524,42 @@ describe("E2E: Client-Server Sync", () => {
     }
   }, 20000);
 
+  it("emits room status error when auth changes and stops auto rejoin", async () => {
+    let allowAuth = true;
+    const authPort = await getPort();
+    const authServer = new SimpleServer({
+      port: authPort,
+      authenticate: async (_roomId, _crdt, _auth) => (allowAuth ? "write" : null),
+    });
+    await authServer.start();
+
+    const client = new LoroWebsocketClient({ url: `ws://localhost:${authPort}` });
+    await client.waitConnected();
+    const adaptor = new LoroAdaptor();
+    const statuses: string[] = [];
+    await client.join({
+      roomId: "auth-room",
+      crdtAdaptor: adaptor,
+      auth: new TextEncoder().encode("token"),
+      onStatusChange: s => statuses.push(s),
+    });
+
+    // Take server offline, then disallow auth and bring it back
+    await authServer.stop();
+    allowAuth = false;
+    await authServer.start();
+
+    await waitUntil(
+      () =>
+        statuses.includes("error"),
+      8000,
+      50
+    );
+
+    client.destroy();
+    await authServer.stop();
+  }, 15000);
+
   it("destroy rejects pending ping waiters", async () => {
     const client = new LoroWebsocketClient({ url: `ws://localhost:${port}` });
     await client.waitConnected();
@@ -619,6 +668,42 @@ describe("E2E: Client-Server Sync", () => {
     wss.close();
   }, 10000);
 
+  it("marks room disconnected when maxAttempts reached", async () => {
+    const maxPort = await getPort();
+    const wss = new WebSocketServer({ port: maxPort });
+    wss.on("connection", ws => {
+      // Immediately close to force retries
+      ws.close(1011, "boom");
+    });
+
+    const statuses: string[] = [];
+    const roomStatuses: string[] = [];
+    const client = new LoroWebsocketClient({
+      url: `ws://localhost:${maxPort}`,
+      reconnect: { maxAttempts: 1, initialDelayMs: 50, maxDelayMs: 50 },
+    });
+    client.onStatusChange(s => statuses.push(s));
+
+    const adaptor = new LoroAdaptor();
+    const join = client.join({
+      roomId: "limited-room",
+      crdtAdaptor: adaptor,
+      onStatusChange: s => roomStatuses.push(s),
+    });
+
+    await expect(join).rejects.toBeTruthy();
+
+    await waitUntil(
+      () => statuses.at(-1) === ClientStatus.Disconnected,
+      4000,
+      25
+    );
+    expect(roomStatuses.at(-1)).toBe("disconnected");
+
+    client.destroy();
+    wss.close();
+  }, 8000);
+
   it("queues joins issued while connecting and flushes once connected", async () => {
     const queuedPort = await getPort();
     const client = new LoroWebsocketClient({
@@ -626,10 +711,12 @@ describe("E2E: Client-Server Sync", () => {
       pingIntervalMs: 200, // slow ping to avoid noise before server up
     });
     const adaptor = new LoroAdaptor();
+    const statuses: string[] = [];
 
     const joinPromise = client.join({
       roomId: "queued-join",
       crdtAdaptor: adaptor,
+      onStatusChange: s => statuses.push(s),
     });
 
     // Start server after join was requested
@@ -642,6 +729,9 @@ describe("E2E: Client-Server Sync", () => {
     text.insert(0, "hello");
     adaptor.getDoc().commit();
     await room.waitForReachingServerVersion();
+
+    expect(statuses).toContain("connecting");
+    expect(statuses).toContain("joined");
 
     await room.destroy();
     client.destroy();
