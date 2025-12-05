@@ -265,6 +265,13 @@ export class SimpleServer {
         this.handleLeave(client, message);
         break;
       case MessageType.Ack:
+        // Clients may report failures when they cannot apply a server update.
+        if (message.status !== UpdateStatusCode.Ok) {
+          console.warn(
+            `Client reported update failure for ${message.crdt}:${message.roomId} ref ${message.refId} status ${message.status}`
+          );
+        }
+        break;
       case MessageType.RoomError:
         // Server does not expect these from clients; ignore.
         break;

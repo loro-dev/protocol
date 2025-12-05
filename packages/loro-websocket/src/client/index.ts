@@ -41,7 +41,7 @@ interface PendingRoom {
 }
 
 interface InternalRoomHandler {
-  handleDocUpdate(updates: Uint8Array[]): void;
+  handleDocUpdate(updates: Uint8Array[], refId?: HexString): void;
   handleAck(ack: Ack): void;
   handleRoomError(error: RoomError): void;
 }
@@ -166,7 +166,7 @@ export class LoroWebsocketClient {
   private pendingRooms: Map<string, PendingRoom> = new Map();
   private activeRooms: Map<string, ActiveRoom> = new Map();
   // Buffer for %ELO only: backfills can arrive immediately after JoinResponseOk
-  private preJoinUpdates: Map<string, Uint8Array[]> = new Map();
+  private preJoinUpdates: Map<string, Array<{ updates: Uint8Array[]; refId?: HexString }>> = new Map();
   private fragmentBatches: Map<string, FragmentBatch> = new Map();
   private roomAdaptors: Map<string, CrdtDocAdaptor> = new Map();
   // Track roomId for each active id so we can rejoin on reconnect
@@ -641,12 +641,12 @@ export class LoroWebsocketClient {
       case MessageType.DocUpdate: {
         const active = this.activeRooms.get(roomId);
         if (active) {
-          active.handler.handleDocUpdate(msg.updates);
+          active.handler.handleDocUpdate(msg.updates, msg.batchId);
         } else {
           const pending = this.pendingRooms.get(roomId);
           if (pending) {
             const buf = this.preJoinUpdates.get(roomId) ?? [];
-            buf.push(...msg.updates);
+            buf.push({ updates: msg.updates, refId: msg.batchId });
             this.preJoinUpdates.set(roomId, buf);
           }
         }
@@ -763,12 +763,12 @@ export class LoroWebsocketClient {
       const active = this.activeRooms.get(id);
       if (active) {
         // Treat reassembled data as a single update
-        active.handler.handleDocUpdate([reassembledData]);
+        active.handler.handleDocUpdate([reassembledData], batch.header.batchId);
       } else {
         const pending = this.pendingRooms.get(id);
         if (pending) {
           const buf = this.preJoinUpdates.get(id) ?? [];
-          buf.push(reassembledData);
+          buf.push({ updates: [reassembledData], refId: batch.header.batchId });
           this.preJoinUpdates.set(id, buf);
         }
       }
@@ -791,7 +791,9 @@ export class LoroWebsocketClient {
     const buf = this.preJoinUpdates.get(id);
     if (buf && buf.length) {
       try {
-        handler.handleDocUpdate(buf);
+        for (const entry of buf) {
+          handler.handleDocUpdate(entry.updates, entry.refId);
+        }
       } finally {
         this.preJoinUpdates.delete(id);
       }
@@ -1457,8 +1459,29 @@ class LoroWebsocketClientRoomImpl
     return this.crdtAdaptor.waitForReachingServerVersion();
   }
 
-  handleDocUpdate(updates: Uint8Array[]) {
-    this.crdtAdaptor.applyUpdate(updates);
+  handleDocUpdate(updates: Uint8Array[], refId?: HexString) {
+    try {
+      this.crdtAdaptor.applyUpdate(updates);
+    } catch (error) {
+      // Surface to adaptor for custom handling
+      this.crdtAdaptor.handleUpdateError?.(error);
+      // Inform server that the update failed if we can reference the batch ID
+      if (refId && this.client.socket?.readyState === WebSocket.OPEN) {
+        try {
+          this.client.socket.send(
+            encode({
+              type: MessageType.Ack,
+              crdt: this.crdtType,
+              roomId: this.roomId,
+              refId,
+              status: UpdateStatusCode.InvalidUpdate,
+            } as Ack)
+          );
+        } catch (err) {
+          console.error("Failed to send failure Ack", err);
+        }
+      }
+    }
   }
 
   handleAck(ack: Ack) {

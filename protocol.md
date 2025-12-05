@@ -92,6 +92,8 @@ When Recv receives updates in the same room from other peers, it broadcasts them
 
 When Req makes local edits on the document, it sends `DocUpdate` (with its Update Batch ID) or `DocUpdateFragment` messages to Recv. Recv MUST reply with an `Ack` referencing that Update Batch ID (or the fragment batch ID when fragments are used). A status of `0x00` confirms acceptance; non-zero statuses follow Update Status Codes. For example, if Req lacks write permission, Recv sends `Ack(status=0x03 permission_denied)` for that batch.
 
+**WebSocket (client–server) directionality:** when Recv (the server) pushes updates to Req (the client), Req SHOULD NOT send `Ack(status=0x00)` back. The server already assumes delivery over the WebSocket. The client MAY send a non‑zero `Ack` (referencing the server’s batch ID) to report that it failed to apply the update (for example `invalid_update` or `fragment_timeout`).
+
 If Recv forces the peer out of the room (permission change, quota enforcement, malicious behavior, etc.), it sends `RoomError`. After receiving `RoomError`, the peer MUST treat the room as closed and will not receive further messages until it rejoins.
 
 Req sends `Leave` if it is no longer interested in updates for the target document.
@@ -110,6 +112,8 @@ If Recv times out waiting for remaining fragments of a batch, it MUST:
 - Send `Ack(status=0x07 fragment_timeout)` with the 8-byte batch ID so Req can resend.
 
 Upon receiving `Ack(status=0x07 fragment_timeout)`, Req SHOULD resend the whole batch (header + all fragments) with the same or a new batch ID.
+
+If Req (client) times out while reassembling fragments sent by Recv (server), it MAY send `Ack(status=0x07 fragment_timeout)` with that batch ID to signal the failure. Servers MAY choose to resend the batch or fall back to a snapshot/delta strategy.
 
 ## Errors and status
 
@@ -181,7 +185,7 @@ Implementation note: On platforms that support automatic responses (e.g., Cloudf
 
 ## Why these changes (v1)
 
-- Reliable delivery semantics: explicit `Ack` for each update batch (or fragment batch) lets applications know whether a change was accepted instead of inferring success from silence.
+- Reliable delivery semantics: explicit `Ack` for each client‑originated update batch (or fragment batch) lets applications know whether a change was accepted instead of inferring success from silence; clients only emit `Ack` when a server‑originated update fails.
 - Clear eviction signal: `RoomError` distinguishes "your update failed" from "you are no longer in the room", enabling clients to stop syncing and prompt rejoin or escalation.
 - Better error mapping: moving `ok` to `0x00` and `unknown` to `0x01` aligns status bytes with common success/failure conventions and leaves room for app-specific errors.
 - Debuggability: 64-bit batch IDs make ACK correlation collision-resistant even on long-lived, multiplexed connections while adding negligible overhead versus the 256 KiB frame limit.
