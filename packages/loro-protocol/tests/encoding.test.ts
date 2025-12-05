@@ -347,7 +347,7 @@ describe("Message Encoding and Decoding", () => {
         type: MessageType.RoomError,
         crdt: CrdtType.Loro,
         roomId,
-        code: RoomErrorCode.Unknown,
+        code: RoomErrorCode.Evicted,
         message: "evicted",
       };
 
@@ -356,7 +356,7 @@ describe("Message Encoding and Decoding", () => {
 
       expect(decoded.type).toBe(MessageType.RoomError);
       if (decoded.type !== MessageType.RoomError) throw new Error("bad type");
-      expect(decoded.code).toBe(RoomErrorCode.Unknown);
+      expect(decoded.code).toBe(RoomErrorCode.Evicted);
       expect(decoded.message).toBe("evicted");
     });
   });

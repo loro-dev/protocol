@@ -525,11 +525,26 @@ impl ConnectionWorker {
                 }
             }
             ProtocolMessage::RoomError { code, message, .. } => {
-                if let Some(adaptor) = self.adaptors.lock().await.get_mut(&key) {
-                    adaptor.handle_room_error(code, &message).await;
+                let mut adaptor = self.adaptors.lock().await.remove(&key);
+                if let Some(adaptor_ref) = adaptor.as_mut() {
+                    adaptor_ref.handle_room_error(code, &message).await;
                 }
+
+                // Always clear local state for this room; rejoin (if any) will register anew.
                 self.cleanup_room(&key).await;
                 eprintln!("room error {:?}: {}", code, message);
+
+                if matches!(code, RoomErrorCode::RejoinSuggested) {
+                    if let Some(adaptor_box) = adaptor {
+                        let room_name = key.room.clone();
+                        let client = self.clone();
+                        tokio::spawn(async move {
+                            if let Err(err) = client.join_with_adaptor(&room_name, adaptor_box).await {
+                                eprintln!("rejoin after RoomError failed: {}", err);
+                            }
+                        });
+                    }
+                }
             }
             ProtocolMessage::Ack { ref_id, status, .. } => {
                 if let Some(adaptor) = self.adaptors.lock().await.get_mut(&key) {

@@ -24,4 +24,4 @@ exports[`encoding snapshots > JoinResponseOk write + extra 1`] = `"0x254c4f52097
 
 exports[`encoding snapshots > Leave 1`] = `"0x254c4f5209726f6f6d2d3132333407"`;
 
-exports[`encoding snapshots > RoomError eviction 1`] = `"0x254c4f5209726f6f6d2d3132333406010765766963746564"`;
+exports[`encoding snapshots > RoomError eviction 1`] = `"0x254c4f5209726f6f6d2d3132333406020765766963746564"`;

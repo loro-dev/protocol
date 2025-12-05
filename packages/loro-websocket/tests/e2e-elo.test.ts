@@ -14,6 +14,8 @@ import {
 } from "loro-protocol";
 import { EloAdaptor } from "loro-adaptors/loro";
 
+let skip = false;
+
 // Make WebSocket available globally for the client
 Object.defineProperty(globalThis, "WebSocket", {
   value: WebSocket,

@@ -139,7 +139,7 @@ describe("encoding snapshots", () => {
       type: MessageType.RoomError,
       crdt: CrdtType.Loro,
       roomId,
-      code: RoomErrorCode.Unknown,
+      code: RoomErrorCode.Evicted,
       message: "evicted",
     };
     expect(bytesToHex(encode(msg))).toMatchSnapshot();

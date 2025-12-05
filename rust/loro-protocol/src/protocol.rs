@@ -144,13 +144,19 @@ impl UpdateStatusCode {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u8)]
 pub enum RoomErrorCode {
-    Unknown = 0x01,
+    /// Peer requests that we rejoin to recover consistency (e.g., missing updates).
+    RejoinSuggested = 0x01,
+    /// Peer/server evicted us; do not auto-rejoin.
+    Evicted = 0x02,
+    Unknown = 0x7f,
 }
 
 impl RoomErrorCode {
     pub fn from_u8(v: u8) -> Option<Self> {
         Some(match v {
-            0x01 => RoomErrorCode::Unknown,
+            0x01 => RoomErrorCode::RejoinSuggested,
+            0x02 => RoomErrorCode::Evicted,
+            0x7f => RoomErrorCode::Unknown,
             _ => return None,
         })
     }

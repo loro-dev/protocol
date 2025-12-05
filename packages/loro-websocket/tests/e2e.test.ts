@@ -7,6 +7,14 @@ import type { LoroWebsocketClientRoom } from "../src/client";
 import { LoroAdaptor } from "loro-adaptors/loro";
 import { FlockAdaptor } from "loro-adaptors/flock";
 import { Flock } from "@loro-dev/flock";
+import {
+  encode,
+  decode,
+  MessageType,
+  RoomErrorCode,
+  type JoinResponseOk,
+  type RoomError,
+} from "loro-protocol";
 
 
 
@@ -884,6 +892,116 @@ describe("E2E: Client-Server Sync", () => {
   }, 12000);
 });
 
+describe("E2E: RoomError rejoin policy", () => {
+  it("does not auto rejoin after eviction (0x02)", async () => {
+    const port = await getPort();
+    const wss = new WebSocketServer({ port });
+    let joinCount = 0;
+
+    wss.on("connection", ws => {
+      ws.on("message", data => {
+        let msg;
+        try {
+          msg = decode(toUint8Array(data));
+        } catch {
+          return;
+        }
+        if (msg.type === MessageType.JoinRequest) {
+          joinCount += 1;
+          const res: JoinResponseOk = {
+            type: MessageType.JoinResponseOk,
+            crdt: msg.crdt,
+            roomId: msg.roomId,
+            permission: "write",
+            version: new Uint8Array(),
+          };
+          ws.send(encode(res));
+          setTimeout(() => {
+            const err: RoomError = {
+              type: MessageType.RoomError,
+              crdt: msg.crdt,
+              roomId: msg.roomId,
+              code: RoomErrorCode.Evicted,
+              message: "evicted",
+            };
+            ws.send(encode(err));
+          }, 50);
+        }
+      });
+    });
+
+    const client = new LoroWebsocketClient({ url: `ws://localhost:${port}` });
+    await client.waitConnected();
+    const adaptor = new LoroAdaptor();
+    await client.join({ roomId: "room-evict", crdtAdaptor: adaptor });
+
+    // Wait to allow potential auto-rejoin attempts
+    await new Promise(r => setTimeout(r, 400));
+
+    expect(joinCount).toBe(1);
+
+    await client.destroy();
+    wss.close();
+  }, 5000);
+
+  it("auto rejoins once when server suggests rejoin (0x01)", async () => {
+    const port = await getPort();
+    const wss = new WebSocketServer({ port });
+    let joinCount = 0;
+
+    wss.on("connection", ws => {
+      ws.on("message", data => {
+        let msg;
+        try {
+          msg = decode(toUint8Array(data));
+        } catch {
+          return;
+        }
+        if (msg.type === MessageType.JoinRequest) {
+          joinCount += 1;
+          const res: JoinResponseOk = {
+            type: MessageType.JoinResponseOk,
+            crdt: msg.crdt,
+            roomId: msg.roomId,
+            permission: "write",
+            version: new Uint8Array(),
+          };
+          ws.send(encode(res));
+          // Only prompt rejoin on first join
+          if (joinCount === 1) {
+            setTimeout(() => {
+              const err: RoomError = {
+                type: MessageType.RoomError,
+                crdt: msg.crdt,
+                roomId: msg.roomId,
+                code: RoomErrorCode.RejoinSuggested,
+                message: "please rejoin",
+              };
+              ws.send(encode(err));
+            }, 50);
+          }
+        }
+      });
+    });
+
+    const client = new LoroWebsocketClient({
+      url: `ws://localhost:${port}`,
+      reconnect: { initialDelayMs: 50, maxDelayMs: 150, jitter: 0 },
+    });
+    await client.waitConnected();
+    const adaptor = new LoroAdaptor();
+    await client.join({ roomId: "room-rejoin", crdtAdaptor: adaptor });
+
+    await waitUntil(() => joinCount >= 2, 5000, 20).catch(() => {});
+    // Ensure no extra rejoins
+    await new Promise(r => setTimeout(r, 200));
+    expect(joinCount).toBe(2);
+
+    await client.destroy();
+    wss.close();
+  }, 8000);
+});
+
 function installMockWindow(initialOnline = true) {
   const originalWindowDescriptor = Object.getOwnPropertyDescriptor(
     globalThis,
@@ -1007,5 +1125,15 @@ async function waitUntil(
     await new Promise(r => setTimeout(r, interval));
   }
   throw new Error("Condition not met within timeout");
+}
+
+function toUint8Array(data: Buffer | ArrayBuffer | ArrayBufferView | string): Uint8Array {
+  if (typeof data === "string") return new TextEncoder().encode(data);
+  if (data instanceof ArrayBuffer) return new Uint8Array(data);
+  if (ArrayBuffer.isView(data)) return new Uint8Array(data.buffer, data.byteOffset, data.byteLength);
+  // Buffer from ws in Node
+  // @ts-ignore
+  if (typeof Buffer !== "undefined" && Buffer.isBuffer(data)) return new Uint8Array(data);
+  return new Uint8Array();
 }
 // (duplicate WebSocketServer import removed)

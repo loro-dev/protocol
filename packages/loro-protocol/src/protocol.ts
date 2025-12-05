@@ -56,7 +56,9 @@ export const JoinErrorCode = {
 export type JoinErrorCode = (typeof JoinErrorCode)[keyof typeof JoinErrorCode];
 
 export const RoomErrorCode = {
-  Unknown: 0x01,
+  RejoinSuggested: 0x01,
+  Evicted: 0x02,
+  Unknown: 0x7f,
 } as const;
 export type RoomErrorCode = (typeof RoomErrorCode)[keyof typeof RoomErrorCode];
 

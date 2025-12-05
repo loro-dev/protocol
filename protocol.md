@@ -131,10 +131,13 @@ Codes:
 
 - Fields: 1-byte `code`, `varString message`.
 - Semantics: the peer has been forcibly removed from the room (permission change, quota enforcement, malicious behavior, etc.). No further messages for the room will be delivered until it rejoins.
+- Client behavior: do **not** auto-rejoin after a `RoomError` unless the code explicitly asks for it (0x01). A code of 0x01 is a hint that another peer needs you to rejoin to recover consistency (e.g., missing updates while the sender lacks your version vector). When receiving 0x01, clients SHOULD issue a single immediate `JoinRequest`; for any other code, clients MUST stay disconnected until the application chooses to rejoin.
 
 Codes:
 
-- 0x01 unknown: unspecified room-level failure that results in eviction.
+- 0x01 rejoin_suggested: peer requests a fresh join so both sides can reconcile state. Clients MAY auto-rejoin once.
+- 0x02 evicted: explicit eviction; clients MUST NOT auto-rejoin.
+- 0x7F unknown/app_error: unspecified room-level failure; treat as fatal unless the application decides otherwise.
 
 ### Update Status Codes (Ack status byte)
 

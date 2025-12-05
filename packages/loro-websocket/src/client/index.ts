@@ -12,6 +12,7 @@ import {
   DocUpdateFragment,
   Ack,
   RoomError,
+  RoomErrorCode,
   UpdateStatusCode,
   Leave,
   JoinErrorCode,
@@ -555,49 +556,63 @@ export class LoroWebsocketClient {
       if (!roomId) continue;
       const active = this.activeRooms.get(id);
       if (!active) continue;
-      // Prepare a lightweight pending entry so JoinError handling can retry version formats
-      const roomPromise = Promise.resolve(active.room);
-      const pending: PendingRoom = {
-        room: roomPromise,
-        resolve: (res: JoinResponseOk) => {
-          // On successful rejoin, let adaptor reconcile to server
-          adaptor
-            .handleJoinOk(res)
-            .catch(e => {
-              console.error(e);
-            })
-            .finally(() => {
-              this.pendingRooms.delete(id);
-              this.emitRoomStatus(id, RoomJoinStatus.Joined);
-            });
-        },
-        reject: (error: Error) => {
-          console.error("Rejoin failed:", error);
-          // Remove stale room entry so callers can decide to rejoin manually
-          this.cleanupRoom(roomId, adaptor.crdtType);
-          this.emitRoomStatus(id, RoomJoinStatus.Error);
-        },
-        adaptor,
-        roomId,
-        auth: this.roomAuth.get(id),
-        isRejoin: true,
-      };
-      this.pendingRooms.set(id, pending);
+      this.sendRejoinRequest(id, roomId, adaptor, active.room, this.roomAuth.get(id));
+    }
+  }
 
-      try {
-        this.ws.send(
-          encode({
-            type: MessageType.JoinRequest,
-            crdt: adaptor.crdtType,
-            roomId,
-            auth: pending.auth ?? new Uint8Array(),
-            version: adaptor.getVersion(),
-          } as JoinRequest)
-        );
-        this.emitRoomStatus(id, RoomJoinStatus.Reconnecting);
-      } catch (e) {
-        console.error("Failed to send rejoin request:", e);
+  private sendRejoinRequest(
+    id: string,
+    roomId: string,
+    adaptor: CrdtDocAdaptor,
+    room: LoroWebsocketClientRoom,
+    auth?: Uint8Array
+  ) {
+    // Prepare a lightweight pending entry so JoinError handling can retry version formats
+    const pending: PendingRoom = {
+      room: Promise.resolve(room),
+      resolve: (res: JoinResponseOk) => {
+        adaptor
+          .handleJoinOk(res)
+          .catch(e => {
+            console.error(e);
+          })
+          .finally(() => {
+            this.pendingRooms.delete(id);
+            this.emitRoomStatus(id, RoomJoinStatus.Joined);
+          });
+      },
+      reject: (error: Error) => {
+        console.error("Rejoin failed:", error);
+        this.cleanupRoom(roomId, adaptor.crdtType);
+        this.emitRoomStatus(id, RoomJoinStatus.Error);
+      },
+      adaptor,
+      roomId,
+      auth,
+      isRejoin: true,
+    };
+    this.pendingRooms.set(id, pending);
+
+    const payload = encode({
+      type: MessageType.JoinRequest,
+      crdt: adaptor.crdtType,
+      roomId,
+      auth: auth ?? new Uint8Array(),
+      version: adaptor.getVersion(),
+    } as JoinRequest);
+
+    try {
+      if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+        this.ws.send(payload);
+      } else {
+        this.enqueueJoin(payload);
+        void this.connect();
       }
+      this.emitRoomStatus(id, RoomJoinStatus.Reconnecting);
+    } catch (e) {
+      console.error("Failed to send rejoin request:", e);
+      this.cleanupRoom(roomId, adaptor.crdtType);
+      this.emitRoomStatus(id, RoomJoinStatus.Error);
     }
   }
 
@@ -647,12 +662,21 @@ export class LoroWebsocketClient {
       }
       case MessageType.RoomError: {
         const active = this.activeRooms.get(roomId);
+        const adaptor = this.roomAdaptors.get(roomId);
+        const auth = this.roomAuth.get(roomId);
+        const shouldRejoin = msg.code === RoomErrorCode.RejoinSuggested;
         if (active) {
           active.handler.handleRoomError(msg);
         }
-        // Remove local room state so client can rejoin explicitly
-        this.cleanupRoom(msg.roomId, msg.crdt);
-        this.emitRoomStatus(roomId, RoomJoinStatus.Error);
+        // Drop any in-flight join since the server explicitly removed us
+        this.pendingRooms.delete(roomId);
+        if (shouldRejoin && active && adaptor) {
+          this.sendRejoinRequest(roomId, msg.roomId, adaptor, active.room, auth);
+        } else {
+          // Remove local room state so client does not auto-retry unless requested
+          this.cleanupRoom(msg.roomId, msg.crdt);
+          this.emitRoomStatus(roomId, RoomJoinStatus.Error);
+        }
         break;
       }
       case MessageType.Ack: {
@@ -1454,8 +1478,10 @@ class LoroWebsocketClientRoomImpl
 
   handleRoomError(error: RoomError) {
     this.crdtAdaptor.handleRoomError?.(error);
-    // Default action: mark as disconnected so app can rejoin explicitly.
-    this.destroyed = true;
+    // Only mark destroyed for terminal errors; rejoin-suggested errors keep the room alive for retry.
+    if (error.code !== RoomErrorCode.RejoinSuggested) {
+      this.destroyed = true;
+    }
   }
 
   async leave() {

@@ -162,11 +162,11 @@ fn snapshot_room_error_eviction() {
     let msg = ProtocolMessage::RoomError {
         crdt: CrdtType::Loro,
         room_id: "room-1234".to_string(),
-        code: RoomErrorCode::Unknown,
+        code: RoomErrorCode::Evicted,
         message: "evicted".into(),
     };
     let hex = to_hex(&encode(&msg).unwrap());
-    assert_eq!(hex, "0x254c4f5209726f6f6d2d3132333406010765766963746564");
+    assert_eq!(hex, "0x254c4f5209726f6f6d2d3132333406020765766963746564");
 }
 
 #[test]

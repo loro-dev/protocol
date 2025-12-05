@@ -83,7 +83,11 @@ function isUpdateStatusCode(x: number): x is UpdateStatusCode {
 }
 
 function isRoomErrorCode(x: number): x is RoomErrorCode {
-  return x === RoomErrorCode.Unknown;
+  return (
+    x === RoomErrorCode.RejoinSuggested ||
+    x === RoomErrorCode.Evicted ||
+    x === RoomErrorCode.Unknown
+  );
 }
 
 function readBatchId(reader: BytesReader, context: string): HexString {
