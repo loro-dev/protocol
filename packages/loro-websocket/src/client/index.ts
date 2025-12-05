@@ -496,7 +496,7 @@ export class LoroWebsocketClient {
     if (this.reconnectTimer) return;
     if (this.offline) return;
     const policy = this.getReconnectPolicy();
-    if (policy.enabled === false) return;
+    if (!policy.enabled) return;
     const attempt = ++this.reconnectAttempts;
     const delay = immediate ? 0 : this.computeBackoffDelay(attempt);
     this.reconnectTimer = setTimeout(() => {

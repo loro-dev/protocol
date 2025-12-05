@@ -458,10 +458,11 @@ describe("E2E: Client-Server Sync", () => {
 
       await Promise.all([client1.waitConnected(), client2.waitConnected()]);
 
-      const initialConnectedCount1 = statuses1.filter(
+      // Keep placeholders to mirror earlier assertions; unused now
+      const _initialConnectedCount1 = statuses1.filter(
         s => s === ClientStatus.Connected
       ).length;
-      const initialConnectedCount2 = statuses2.filter(
+      const _initialConnectedCount2 = statuses2.filter(
         s => s === ClientStatus.Connected
       ).length;
 
@@ -616,8 +617,13 @@ describe("E2E: Client-Server Sync", () => {
     wss.on("connection", ws => {
       connections++;
       const connId = connections;
-      ws.on("message", data => {
-        const text = data.toString();
+      ws.on("message", (data: Buffer | ArrayBuffer | string) => {
+        const text =
+          typeof data === "string"
+            ? data
+            : Buffer.isBuffer(data)
+              ? data.toString()
+              : new TextDecoder().decode(new Uint8Array(data as ArrayBuffer));
         if (text === "ping") {
           // Only respond for non-fatal connections
           if (connId >= 2) {
@@ -744,8 +750,13 @@ describe("E2E: Client-Server Sync", () => {
     let connId = 0;
     wss.on("connection", ws => {
       const id = ++connId;
-      ws.on("message", data => {
-        const text = data.toString();
+      ws.on("message", (data: Buffer | ArrayBuffer | string) => {
+        const text =
+          typeof data === "string"
+            ? data
+            : Buffer.isBuffer(data)
+              ? data.toString()
+              : new TextDecoder().decode(new Uint8Array(data as ArrayBuffer));
         if (text === "ping") {
           if (id >= 2) ws.send("pong");
           // first connection intentionally ignores to trigger timeout
