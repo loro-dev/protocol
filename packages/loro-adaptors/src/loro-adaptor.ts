@@ -7,6 +7,11 @@ import type { CrdtAdaptorContext, CrdtDocAdaptor } from "./types";
 
 export interface LoroAdaptorConfig {
   onImportError?: (error: Error, data: Uint8Array[]) => void;
+  onUpdateError?: (
+    updates: Uint8Array[],
+    errorCode: number,
+    reason?: string
+  ) => void;
 }
 
 export class LoroAdaptor implements CrdtDocAdaptor {
@@ -72,6 +77,14 @@ export class LoroAdaptor implements CrdtDocAdaptor {
 
   getAlternativeVersion(_currentVersion: Uint8Array): Uint8Array | undefined {
     return undefined;
+  }
+
+  onUpdateError(
+    updates: Uint8Array[],
+    errorCode: number,
+    reason?: string
+  ): void {
+    this.config.onUpdateError?.(updates, errorCode, reason);
   }
 
   async handleJoinOk(res: JoinResponseOk): Promise<void> {

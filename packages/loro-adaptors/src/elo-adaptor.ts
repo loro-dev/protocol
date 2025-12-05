@@ -24,6 +24,11 @@ export interface EloAdaptorConfig {
     err: Error,
     meta: { kind: "delta" | "snapshot"; keyId: string }
   ) => void;
+  onUpdateError?: (
+    updates: Uint8Array[],
+    errorCode: number,
+    reason?: string
+  ) => void;
 }
 
 export class EloAdaptor implements CrdtDocAdaptor {
@@ -155,6 +160,14 @@ export class EloAdaptor implements CrdtDocAdaptor {
 
   getAlternativeVersion(_currentVersion: Uint8Array): Uint8Array | undefined {
     return undefined;
+  }
+
+  onUpdateError(
+    updates: Uint8Array[],
+    errorCode: number,
+    reason?: string
+  ): void {
+    this.config.onUpdateError?.(updates, errorCode, reason);
   }
 
   async handleJoinOk(res: JoinResponseOk): Promise<void> {

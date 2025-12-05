@@ -39,6 +39,17 @@ export interface CrdtDocAdaptor {
   getAlternativeVersion?: (
     currentVersion: Uint8Array
   ) => Uint8Array | undefined;
+  /**
+   * Called when the server rejects a previously sent update batch.
+   * @param updates The original updates that were sent
+   * @param errorCode The numeric update status code from the Ack
+   * @param reason Optional human-readable reason if available
+   */
+  onUpdateError?: (
+    updates: Uint8Array[],
+    errorCode: number,
+    reason?: string
+  ) => void;
   // Legacy hook retained for compatibility
   handleUpdateError?: (error: unknown) => void;
   destroy: () => void;

@@ -107,12 +107,12 @@ import { YjsAwarenessServerAdaptor } from "loro-adaptors/yjs";
 ## API
 
 - `loro-adaptors/loro`
-  - `new LoroAdaptor(doc?: LoroDoc, config?: { onImportError? })`
+  - `new LoroAdaptor(doc?: LoroDoc, config?: { onImportError?, onUpdateError? })`
   - `new LoroEphemeralAdaptor(store?: EphemeralStore)`
   - `new LoroPersistentStoreAdaptor(store?: EphemeralStore)`
-  - `new EloAdaptor(docOrConfig: LoroDoc | { getPrivateKey, ivFactory?, onDecryptError? })`
+  - `new EloAdaptor(docOrConfig: LoroDoc | { getPrivateKey, ivFactory?, onDecryptError?, onUpdateError? })`
 - `loro-adaptors/flock`
-  - `new FlockAdaptor(flock: Flock, config?: { onImportError? })`
+  - `new FlockAdaptor(flock: Flock, config?: { onImportError?, onUpdateError? })`
 - `loro-adaptors/yjs`
   - `new YjsAwarenessServerAdaptor()`
 

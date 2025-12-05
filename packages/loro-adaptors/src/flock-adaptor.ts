@@ -95,6 +95,11 @@ function deserializeBundle(bytes: Uint8Array): FlockExportBundle {
 
 export interface FlockAdaptorConfig {
   onImportError?: (error: Error, data: Uint8Array[]) => void;
+  onUpdateError?: (
+    updates: Uint8Array[],
+    errorCode: number,
+    reason?: string
+  ) => void;
 }
 
 /**
@@ -167,6 +172,14 @@ export class FlockAdaptor implements CrdtDocAdaptor {
 
   getAlternativeVersion(): Uint8Array | undefined {
     return undefined;
+  }
+
+  onUpdateError(
+    updates: Uint8Array[],
+    errorCode: number,
+    reason?: string
+  ): void {
+    this.config.onUpdateError?.(updates, errorCode, reason);
   }
 
   async handleJoinOk(res: JoinResponseOk): Promise<void> {

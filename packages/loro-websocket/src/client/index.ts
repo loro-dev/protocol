@@ -167,6 +167,8 @@ export class LoroWebsocketClient {
   private activeRooms: Map<string, ActiveRoom> = new Map();
   // Buffer for %ELO only: backfills can arrive immediately after JoinResponseOk
   private preJoinUpdates: Map<string, Array<{ updates: Uint8Array[]; refId?: HexString }>> = new Map();
+  // Track outbound update batches so we can surface errors with payload context
+  private sentUpdateBatches: Map<HexString, { roomKey: string; updates: Uint8Array[] }> = new Map();
   private fragmentBatches: Map<string, FragmentBatch> = new Map();
   private roomAdaptors: Map<string, CrdtDocAdaptor> = new Map();
   // Track roomId for each active id so we can rejoin on reconnect
@@ -856,6 +858,7 @@ export class LoroWebsocketClient {
 
   cleanupRoom(roomId: string, crdtType: CrdtType) {
     const id = crdtType + roomId;
+    this.purgeSentBatchesForRoom(id);
     this.activeRooms.delete(id);
     this.pendingRooms.delete(id);
     this.roomAdaptors.delete(id);
@@ -1079,6 +1082,12 @@ export class LoroWebsocketClient {
     );
 
     const batchId = randomBatchId();
+    const roomKey = `${crdt}${roomId}`;
+    // Store the original payload so we can surface detailed errors on Ack
+    this.sentUpdateBatches.set(batchId, {
+      roomKey,
+      updates: [update.slice()],
+    });
 
     if (update.length <= FRAG_LIMIT) {
       // Send as a single DocUpdate with one update entry
@@ -1135,6 +1144,22 @@ export class LoroWebsocketClient {
     );
   }
 
+  consumeSentBatch(refId: HexString): { roomKey: string; updates: Uint8Array[] } | undefined {
+    const entry = this.sentUpdateBatches.get(refId);
+    if (entry) {
+      this.sentUpdateBatches.delete(refId);
+    }
+    return entry;
+  }
+
+  private purgeSentBatchesForRoom(roomKey: string): void {
+    for (const [refId, entry] of Array.from(this.sentUpdateBatches.entries())) {
+      if (entry.roomKey === roomKey) {
+        this.sentUpdateBatches.delete(refId);
+      }
+    }
+  }
+
   /**
    * Destroy the client, removing listeners and stopping timers.
    * After destroy, the instance should not be used.
@@ -1162,6 +1187,7 @@ export class LoroWebsocketClient {
       this.ops.onWsClose?.();
     }
     this.queuedJoins = [];
+    this.sentUpdateBatches.clear();
     this.detachSocketListeners(ws);
     try {
       this.removeNetworkListeners?.();
@@ -1482,8 +1508,14 @@ class LoroWebsocketClientRoomImpl
   }
 
   handleAck(ack: Ack) {
+    const sent = this.client.consumeSentBatch(ack.refId);
     if (ack.status !== UpdateStatusCode.Ok) {
-      console.warn(`Ack status ${ack.status} for ${this.crdtType}:${this.roomId} (ref ${ack.refId})`);
+      const updates = sent?.updates ?? [];
+      const reason = updateStatusToReason(ack.status);
+      this.crdtAdaptor.onUpdateError?.(updates, ack.status, reason);
+      if (!sent) {
+        console.warn(`Ack status ${ack.status} for ${this.crdtType}:${this.roomId} (ref ${ack.refId}) with no matching batch`);
+      }
     }
   }
 
@@ -1523,6 +1555,27 @@ class LoroWebsocketClientRoomImpl
 }
 
 // --- Keepalive helpers (ping/pong) ---
+
+function updateStatusToReason(status: UpdateStatusCode): string | undefined {
+  switch (status) {
+    case UpdateStatusCode.Unknown:
+      return "unknown";
+    case UpdateStatusCode.PermissionDenied:
+      return "permission_denied";
+    case UpdateStatusCode.InvalidUpdate:
+      return "invalid_update";
+    case UpdateStatusCode.PayloadTooLarge:
+      return "payload_too_large";
+    case UpdateStatusCode.RateLimited:
+      return "rate_limited";
+    case UpdateStatusCode.FragmentTimeout:
+      return "fragment_timeout";
+    case UpdateStatusCode.AppError:
+      return "app_error";
+    default:
+      return undefined;
+  }
+}
 
 // --- Internal ping helpers ---
 function isPositive(v: unknown): v is number {

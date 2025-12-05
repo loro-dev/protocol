@@ -47,6 +47,7 @@ use std::{
     sync::{
         atomic::{AtomicU64, Ordering},
         Arc,
+        Mutex as StdMutex,
     },
 };
 use tokio::{
@@ -232,6 +233,8 @@ mod tests {
         let adaptors = Arc::new(Mutex::new(HashMap::new()));
         let pre_join_buf = Arc::new(Mutex::new(HashMap::new()));
         let frag_batches = Arc::new(Mutex::new(HashMap::new()));
+        let batch_counter = Arc::new(AtomicU64::new(1));
+        let sent_batches = Arc::new(StdMutex::new(HashMap::new()));
         let config = Arc::new(ClientConfig::default());
 
         let worker = ConnectionWorker::new(
@@ -241,6 +244,8 @@ mod tests {
             adaptors.clone(),
             pre_join_buf,
             frag_batches,
+            batch_counter,
+            sent_batches,
             config,
         );
 
@@ -338,6 +343,8 @@ struct ConnectionWorker {
     adaptors: Arc<Mutex<HashMap<RoomKey, Box<dyn CrdtDocAdaptor + Send + Sync>>>>,
     pre_join_buf: Arc<Mutex<HashMap<RoomKey, Vec<Vec<u8>>>>>,
     frag_batches: Arc<Mutex<HashMap<(RoomKey, protocol::BatchId), FragmentBatch>>>,
+    next_batch_id: Arc<AtomicU64>,
+    sent_batches: Arc<StdMutex<HashMap<(RoomKey, protocol::BatchId), Vec<Vec<u8>>>>>,
     config: Arc<ClientConfig>,
 }
 
@@ -349,6 +356,8 @@ impl ConnectionWorker {
         adaptors: Arc<Mutex<HashMap<RoomKey, Box<dyn CrdtDocAdaptor + Send + Sync>>>>,
         pre_join_buf: Arc<Mutex<HashMap<RoomKey, Vec<Vec<u8>>>>>,
         frag_batches: Arc<Mutex<HashMap<(RoomKey, protocol::BatchId), FragmentBatch>>>,
+        next_batch_id: Arc<AtomicU64>,
+        sent_batches: Arc<StdMutex<HashMap<(RoomKey, protocol::BatchId), Vec<Vec<u8>>>>>,
         config: Arc<ClientConfig>,
     ) -> Self {
         Self {
@@ -358,6 +367,8 @@ impl ConnectionWorker {
             adaptors,
             pre_join_buf,
             frag_batches,
+            next_batch_id,
+            sent_batches,
             config,
         }
     }
@@ -537,7 +548,16 @@ impl ConnectionWorker {
                 if matches!(code, RoomErrorCode::RejoinSuggested) {
                     if let Some(adaptor_box) = adaptor {
                         let room_name = key.room.clone();
-                        let client = self.clone();
+                        let client = LoroWebsocketClient {
+                            tx: self.tx.clone(),
+                            rooms: self.rooms.clone(),
+                            pending: self.pending.clone(),
+                            adaptors: self.adaptors.clone(),
+                            pre_join_buf: self.pre_join_buf.clone(),
+                            next_batch_id: self.next_batch_id.clone(),
+                            sent_batches: self.sent_batches.clone(),
+                            config: self.config.clone(),
+                        };
                         tokio::spawn(async move {
                             if let Err(err) = client.join_with_adaptor(&room_name, adaptor_box).await {
                                 eprintln!("rejoin after RoomError failed: {}", err);
@@ -547,7 +567,21 @@ impl ConnectionWorker {
                 }
             }
             ProtocolMessage::Ack { ref_id, status, .. } => {
+                let sent_payloads = {
+                    let mut map = self.sent_batches.lock().unwrap();
+                    map.remove(&(key.clone(), ref_id))
+                };
+
                 if let Some(adaptor) = self.adaptors.lock().await.get_mut(&key) {
+                    if status != UpdateStatusCode::Ok {
+                        adaptor
+                            .handle_update_error(
+                                sent_payloads.clone().unwrap_or_default(),
+                                status,
+                                Some(format!("{:?}", status)),
+                            )
+                            .await;
+                    }
                     adaptor.handle_ack(ref_id, status).await;
                 } else if status != UpdateStatusCode::Ok {
                     eprintln!(
@@ -574,6 +608,10 @@ impl ConnectionWorker {
         self.frag_batches
             .lock()
             .await
+            .retain(|(room, _), _| room != key);
+        self.sent_batches
+            .lock()
+            .unwrap()
             .retain(|(room, _), _| room != key);
     }
 }
@@ -630,6 +668,9 @@ pub struct LoroWebsocketClient {
     pre_join_buf: Arc<Mutex<HashMap<RoomKey, Vec<Vec<u8>>>>>,
     // For generating unique fragment batch ids
     next_batch_id: Arc<AtomicU64>,
+    // Track outbound batches to surface update errors with original payloads
+    sent_batches:
+        Arc<StdMutex<HashMap<(RoomKey, protocol::BatchId), Vec<Vec<u8>>>>>,
     // Configurable knobs
     config: Arc<ClientConfig>,
 }
@@ -679,6 +720,9 @@ impl LoroWebsocketClient {
             Arc::new(Mutex::new(HashMap::new()));
         let frag_batches_reader: Arc<Mutex<HashMap<(RoomKey, protocol::BatchId), FragmentBatch>>> =
             Arc::new(Mutex::new(HashMap::new()));
+        let batch_counter = Arc::new(AtomicU64::new(1));
+        let sent_batches: Arc<StdMutex<HashMap<(RoomKey, protocol::BatchId), Vec<Vec<u8>>>>> =
+            Arc::new(StdMutex::new(HashMap::new()));
 
         // Reader
         let cfg = Arc::new(config);
@@ -689,6 +733,8 @@ impl LoroWebsocketClient {
             adaptors_reader.clone(),
             pre_join_buf_reader.clone(),
             frag_batches_reader,
+            batch_counter.clone(),
+            sent_batches.clone(),
             cfg.clone(),
         )
         .spawn(stream);
@@ -699,7 +745,8 @@ impl LoroWebsocketClient {
             pending,
             adaptors: adaptors_reader,
             pre_join_buf: pre_join_buf_reader,
-            next_batch_id: Arc::new(AtomicU64::new(1)),
+            next_batch_id: batch_counter,
+            sent_batches,
             config: cfg,
         })
     }
@@ -747,12 +794,16 @@ impl LoroWebsocketClient {
                     let tx2 = self.tx.clone();
                     let key2 = key.clone();
                     let batch_counter = self.next_batch_id.clone();
+                    let sent_batches = self.sent_batches.clone();
                     let sub = {
                         let guard = doc.lock().await;
                         guard.subscribe_local_update(Box::new(move |bytes| {
                             let batch_id = protocol::BatchId(
                                 batch_counter.fetch_add(1, Ordering::Relaxed).to_be_bytes(),
                             );
+                            if let Ok(mut map) = sent_batches.lock() {
+                                map.insert((key2.clone(), batch_id), vec![bytes.clone()]);
+                            }
                             let msg = ProtocolMessage::DocUpdate {
                                 crdt: key2.crdt,
                                 room_id: key2.room.clone(),
@@ -829,6 +880,8 @@ impl LoroWebsocketClient {
         let crdt = key.crdt;
         let batch_counter = self.next_batch_id.clone();
         let cfg = self.config.clone();
+        let sent_batches = self.sent_batches.clone();
+        let room_key = key.clone();
         let send_update = move |upd: Vec<u8>| {
             // Leave headroom for envelope overhead using configured limits.
             let frag_limit = std::cmp::max(
@@ -841,6 +894,10 @@ impl LoroWebsocketClient {
 
             let batch_id =
                 protocol::BatchId(batch_counter.fetch_add(1, Ordering::Relaxed).to_be_bytes());
+
+            if let Ok(mut map) = sent_batches.lock() {
+                map.insert((room_key.clone(), batch_id), vec![upd.clone()]);
+            }
 
             if upd.len() <= frag_limit {
                 let msg = ProtocolMessage::DocUpdate {
@@ -1043,6 +1100,9 @@ impl LoroWebsocketClientRoom {
         }
         // Drop adaptor
         self.inner.adaptors.lock().await.remove(&self.key);
+        if let Ok(mut map) = self.inner.sent_batches.lock() {
+            map.retain(|(room, _), _| room != &self.key);
+        }
         Ok(())
     }
 }
@@ -1092,6 +1152,13 @@ pub trait CrdtDocAdaptor {
     async fn handle_join_ok(&mut self, permission: protocol::Permission, version: Vec<u8>);
     async fn apply_update(&mut self, updates: Vec<Vec<u8>>);
     async fn handle_ack(&mut self, _ref_id: protocol::BatchId, _status: UpdateStatusCode) {}
+    async fn handle_update_error(
+        &mut self,
+        _updates: Vec<Vec<u8>>,
+        _status: UpdateStatusCode,
+        _reason: Option<String>,
+    ) {
+    }
     async fn handle_room_error(&mut self, _code: RoomErrorCode, _message: &str) {}
     async fn handle_join_err(&mut self, _code: protocol::JoinErrorCode, _message: &str) {}
     async fn get_alternative_version(&mut self, _current: &[u8]) -> Option<Vec<u8>> {
