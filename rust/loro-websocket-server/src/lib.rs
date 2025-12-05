@@ -639,13 +639,20 @@ where
         }
     }
 
-    fn apply_updates(&mut self, room: &RoomKey, updates: &[Vec<u8>]) {
-        if let Some(state) = self.docs.get_mut(room) {
-            if let Err(e) = state.doc.apply_updates(updates) {
-                warn!(room=?room.room, %e, "apply_updates failed");
-            } else if state.doc.should_persist() {
-                state.dirty = true;
+    fn apply_updates(&mut self, room: &RoomKey, updates: &[Vec<u8>]) -> Result<(), String> {
+        match self.docs.get_mut(room) {
+            Some(state) => {
+                if let Err(e) = state.doc.apply_updates(updates) {
+                    warn!(room=?room.room, %e, "apply_updates failed");
+                    Err(e)
+                } else {
+                    if state.doc.should_persist() {
+                        state.dirty = true;
+                    }
+                    Ok(())
+                }
             }
+            None => Err("room not found".into()),
         }
     }
 
@@ -1239,22 +1246,30 @@ where
                                 h.add_fragment_and_maybe_finish(&room, batch_id, index, fragment)
                             {
                                 // On completion: parse and apply to stored doc state if applicable
-                                match crdt {
+                                let apply_result = match crdt {
                                     CrdtType::Loro
                                     | CrdtType::LoroEphemeralStore
                                     | CrdtType::LoroEphemeralStorePersisted => {
                                         let start = std::time::Instant::now();
-                                        h.apply_updates(&room, &[buf.clone()]);
+                                        let res = h.apply_updates(&room, &[buf.clone()]);
                                         let elapsed_ms = start.elapsed().as_millis();
-                                        debug!(room=?room.room, updates=1, ms=%elapsed_ms, "applied reassembled updates");
+                                        if res.is_ok() {
+                                            debug!(room=?room.room, updates=1, ms=%elapsed_ms, "applied reassembled updates");
+                                        }
+                                        res
                                     }
                                     CrdtType::Elo => {
                                         // Apply as indexing-only
-                                        h.apply_updates(&room, &[buf.clone()]);
+                                        h.apply_updates(&room, &[buf.clone()])
                                     }
-                                    _ => {}
+                                    _ => Ok(()),
+                                };
+
+                                if apply_result.is_ok() {
+                                    send_ack(&tx, crdt, &room.room, batch_id, UpdateStatusCode::Ok);
+                                } else {
+                                    send_ack(&tx, crdt, &room.room, batch_id, UpdateStatusCode::InvalidUpdate);
                                 }
-                                send_ack(&tx, crdt, &room.room, batch_id, UpdateStatusCode::Ok);
                             }
                         }
                         ProtocolMessage::DocUpdate {
@@ -1307,46 +1322,42 @@ where
                                     continue;
                                 }
                                 let mut h = hub.lock().await;
-                                match crdt {
+                                let apply_result = match crdt {
                                     CrdtType::Loro
                                     | CrdtType::LoroEphemeralStore
                                     | CrdtType::LoroEphemeralStorePersisted => {
                                         let start = std::time::Instant::now();
-                                        h.apply_updates(&room, &updates);
+                                        let res = h.apply_updates(&room, &updates);
                                         let elapsed_ms = start.elapsed().as_millis();
-                                        h.broadcast(&room, conn_id, Message::Binary(data));
-                                        send_ack(
-                                            &tx,
-                                            crdt,
-                                            &room.room,
-                                            batch_id,
-                                            UpdateStatusCode::Ok,
-                                        );
-                                        debug!(room=?room.room, updates=%updates.len(), ms=%elapsed_ms, "applied and broadcast updates");
+                                        if res.is_ok() {
+                                            debug!(room=?room.room, updates=%updates.len(), ms=%elapsed_ms, "applied and broadcast updates");
+                                        }
+                                        res
                                     }
                                     CrdtType::Elo => {
                                         // Index headers only; payload remains opaque to server.
-                                        h.apply_updates(&room, &updates);
-                                        h.broadcast(&room, conn_id, Message::Binary(data));
-                                        send_ack(
-                                            &tx,
-                                            crdt,
-                                            &room.room,
-                                            batch_id,
-                                            UpdateStatusCode::Ok,
-                                        );
-                                        debug!(room=?room.room, updates=%updates.len(), "indexed and broadcast ELO updates");
+                                        h.apply_updates(&room, &updates)
                                     }
-                                    _ => {
-                                        h.broadcast(&room, conn_id, Message::Binary(data));
-                                        send_ack(
-                                            &tx,
-                                            crdt,
-                                            &room.room,
-                                            batch_id,
-                                            UpdateStatusCode::Ok,
-                                        );
-                                    }
+                                    _ => Ok(()),
+                                };
+
+                                if apply_result.is_ok() {
+                                    h.broadcast(&room, conn_id, Message::Binary(data));
+                                    send_ack(
+                                        &tx,
+                                        crdt,
+                                        &room.room,
+                                        batch_id,
+                                        UpdateStatusCode::Ok,
+                                    );
+                                } else {
+                                    send_ack(
+                                        &tx,
+                                        crdt,
+                                        &room.room,
+                                        batch_id,
+                                        UpdateStatusCode::InvalidUpdate,
+                                    );
                                 }
                             }
                         }

@@ -451,6 +451,10 @@ export class LoroWebsocketClient {
       }
       this.fragmentBatches.clear();
     }
+    // Drop any unacked outbound batches to avoid leaking memory across reconnects
+    if (this.sentUpdateBatches.size) {
+      this.sentUpdateBatches.clear();
+    }
     // Reset any in-flight RTT probe to allow future pings after reconnect
     this.awaitingPongSince = undefined;
     this.ops.onWsClose?.();
