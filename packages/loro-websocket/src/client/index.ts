@@ -212,6 +212,8 @@ export class LoroWebsocketClient {
         reject(err);
       };
     });
+    // prevent unhandled rejection if nobody awaits
+    void this.connectedPromise.catch(() => { });
   }
 
   private attachNetworkListeners(): void {
@@ -1222,12 +1224,12 @@ export class LoroWebsocketClient {
         if (this.missedPongs >= 2) {
           try {
             this.ws?.close(1001, "ping_timeout");
-        } catch (err) {
-          this.logCbError("pingTimer close", err);
+          } catch (err) {
+            this.logCbError("pingTimer close", err);
+          }
+          return;
         }
-        return;
       }
-    }
       try {
         if (this.ws && this.ws.readyState === WebSocket.OPEN) {
           // Avoid overlapping RTT probes
