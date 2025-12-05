@@ -2,9 +2,10 @@ import { LoroDoc, VersionVector, decodeImportBlobMeta } from "loro-crdt";
 import {
   CrdtType,
   JoinResponseOk,
-  UpdateError,
+  Ack,
+  RoomError,
+  UpdateStatusCode,
   MessageType,
-  UpdateErrorCode,
 } from "loro-protocol";
 import type { CrdtAdaptorContext, CrdtDocAdaptor } from "./types";
 import {
@@ -27,7 +28,10 @@ export interface EloAdaptorConfig {
     err: Error,
     meta: { kind: "delta" | "snapshot"; keyId: string }
   ) => void;
-  onUpdateError?: (error: UpdateError) => void;
+  onAck?: (ack: Ack) => void;
+  onUpdateStatus?: (ack: Ack) => void;
+  onRoomError?: (err: RoomError) => void;
+  onUpdateError?: (ack: Ack) => void; // legacy naming
 }
 
 export class EloAdaptor implements CrdtDocAdaptor {
@@ -146,13 +150,18 @@ export class EloAdaptor implements CrdtDocAdaptor {
             await this.sendSnapshot();
           }
         } catch (err) {
-          this.config.onUpdateError?.({
-            type: MessageType.UpdateError,
+          // Surface failure to host and ack with unknown for visibility.
+          console.error("ELO adaptor failed to package/send update", err);
+          const ack: Ack = {
+            type: MessageType.Ack,
             crdt: this.crdtType,
             roomId: "",
-            code: UpdateErrorCode.Unknown,
-            message: err instanceof Error ? err.message : String(err),
-          });
+            refId: "0x0000000000000000",
+            status: UpdateStatusCode.Unknown,
+          };
+          this.config.onAck?.(ack);
+          this.config.onUpdateStatus?.(ack);
+          this.config.onUpdateError?.(ack);
         }
       })();
     });
@@ -235,8 +244,16 @@ export class EloAdaptor implements CrdtDocAdaptor {
     }
   }
 
-  handleUpdateError(error: UpdateError): void {
-    this.config.onUpdateError?.(error);
+  handleAck(ack: Ack): void {
+    this.config.onAck?.(ack);
+    if (ack.status !== UpdateStatusCode.Ok) {
+      this.config.onUpdateStatus?.(ack);
+      this.config.onUpdateError?.(ack);
+    }
+  }
+
+  handleRoomError(err: RoomError): void {
+    this.config.onRoomError?.(err);
   }
 
   destroy(): void {

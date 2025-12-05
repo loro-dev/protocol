@@ -3,7 +3,7 @@
 Rust implementation of the Loro syncing protocol encoder/decoder. Mirrors the TypeScript package in `packages/loro-protocol` and follows the wire format described in `protocol.md` and the end-to-end encrypted flow in `protocol-e2ee.md`.
 
 ## Features
-- Encode/decode Join, DocUpdate, FragmentHeader/Fragment, UpdateError, and Leave messages
+- Encode/decode Join, DocUpdate (with batch IDs), FragmentHeader/Fragment, Ack, RoomError, and Leave messages
 - 256 KiB message size guard to match the wire spec
 - Bytes utilities (`BytesWriter`, `BytesReader`) for varint/varbytes/varstring
 - `%ELO` container parsing; Rust-side encryption helpers are WIP and may evolve

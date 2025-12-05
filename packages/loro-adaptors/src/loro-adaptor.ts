@@ -3,13 +3,19 @@ import {
   CrdtType,
   JoinError,
   JoinResponseOk,
-  UpdateError,
+  Ack,
+  RoomError,
+  UpdateStatusCode,
 } from "loro-protocol";
 import type { CrdtAdaptorContext, CrdtDocAdaptor } from "./types";
 
 export interface LoroAdaptorConfig {
   onImportError?: (error: Error, data: Uint8Array[]) => void;
-  onUpdateError?: (error: UpdateError) => void;
+  onAck?: (ack: Ack) => void;
+  onUpdateStatus?: (ack: Ack) => void;
+  onRoomError?: (err: RoomError) => void;
+  // Legacy hook
+  onUpdateError?: (status: Ack) => void;
 }
 
 export class LoroAdaptor implements CrdtDocAdaptor {
@@ -142,10 +148,16 @@ export class LoroAdaptor implements CrdtDocAdaptor {
     }
   }
 
-  handleUpdateError(error: UpdateError): void {
-    if (this.config.onUpdateError) {
-      this.config.onUpdateError(error);
+  handleAck(ack: Ack): void {
+    this.config.onAck?.(ack);
+    if (ack.status !== UpdateStatusCode.Ok) {
+      this.config.onUpdateStatus?.(ack);
+      this.config.onUpdateError?.(ack);
     }
+  }
+
+  handleRoomError(err: RoomError): void {
+    this.config.onRoomError?.(err);
   }
 
   destroy(): void {

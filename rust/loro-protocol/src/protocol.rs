@@ -66,8 +66,9 @@ pub enum MessageType {
     DocUpdate = 0x03,
     DocUpdateFragmentHeader = 0x04,
     DocUpdateFragment = 0x05,
-    UpdateError = 0x06,
+    RoomError = 0x06,
     Leave = 0x07,
+    Ack = 0x08,
 }
 
 impl MessageType {
@@ -79,8 +80,9 @@ impl MessageType {
             0x03 => MessageType::DocUpdate,
             0x04 => MessageType::DocUpdateFragmentHeader,
             0x05 => MessageType::DocUpdateFragment,
-            0x06 => MessageType::UpdateError,
+            0x06 => MessageType::RoomError,
             0x07 => MessageType::Leave,
+            0x08 => MessageType::Ack,
             _ => return None,
         })
     }
@@ -108,11 +110,12 @@ impl JoinErrorCode {
     }
 }
 
-/// Error codes for UpdateError (0x06).
+/// Status codes carried by Ack (0x08) and mapped from legacy UpdateError codes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u8)]
-pub enum UpdateErrorCode {
-    Unknown = 0x00,
+pub enum UpdateStatusCode {
+    Ok = 0x00,
+    Unknown = 0x01,
     PermissionDenied = 0x03,
     InvalidUpdate = 0x04,
     PayloadTooLarge = 0x05,
@@ -121,16 +124,33 @@ pub enum UpdateErrorCode {
     AppError = 0x7f,
 }
 
-impl UpdateErrorCode {
+impl UpdateStatusCode {
     pub fn from_u8(v: u8) -> Option<Self> {
         Some(match v {
-            0x00 => UpdateErrorCode::Unknown,
-            0x03 => UpdateErrorCode::PermissionDenied,
-            0x04 => UpdateErrorCode::InvalidUpdate,
-            0x05 => UpdateErrorCode::PayloadTooLarge,
-            0x06 => UpdateErrorCode::RateLimited,
-            0x07 => UpdateErrorCode::FragmentTimeout,
-            0x7f => UpdateErrorCode::AppError,
+            0x00 => UpdateStatusCode::Ok,
+            0x01 => UpdateStatusCode::Unknown,
+            0x03 => UpdateStatusCode::PermissionDenied,
+            0x04 => UpdateStatusCode::InvalidUpdate,
+            0x05 => UpdateStatusCode::PayloadTooLarge,
+            0x06 => UpdateStatusCode::RateLimited,
+            0x07 => UpdateStatusCode::FragmentTimeout,
+            0x7f => UpdateStatusCode::AppError,
+            _ => return None,
+        })
+    }
+}
+
+/// Error codes for RoomError (0x06).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(u8)]
+pub enum RoomErrorCode {
+    Unknown = 0x01,
+}
+
+impl RoomErrorCode {
+    pub fn from_u8(v: u8) -> Option<Self> {
+        Some(match v {
+            0x01 => RoomErrorCode::Unknown,
             _ => return None,
         })
     }
@@ -195,6 +215,7 @@ pub enum ProtocolMessage {
         crdt: CrdtType,
         room_id: String,
         updates: Vec<Vec<u8>>,
+        batch_id: BatchId,
     },
     DocUpdateFragmentHeader {
         crdt: CrdtType,
@@ -210,13 +231,17 @@ pub enum ProtocolMessage {
         index: u64,
         fragment: Vec<u8>,
     },
-    UpdateError {
+    RoomError {
         crdt: CrdtType,
         room_id: String,
-        code: UpdateErrorCode,
+        code: RoomErrorCode,
         message: String,
-        batch_id: Option<BatchId>,
-        app_code: Option<String>,
+    },
+    Ack {
+        crdt: CrdtType,
+        room_id: String,
+        ref_id: BatchId,
+        status: UpdateStatusCode,
     },
     Leave {
         crdt: CrdtType,

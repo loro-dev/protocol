@@ -10,12 +10,14 @@ import {
   JoinError,
   DocUpdateFragmentHeader,
   DocUpdateFragment,
-  UpdateError,
-  UpdateErrorCode,
+  Ack,
+  RoomError,
+  UpdateStatusCode,
   Leave,
   JoinErrorCode,
   MAX_MESSAGE_SIZE,
   bytesToHex,
+  HexString,
 } from "loro-protocol";
 import type { CrdtDocAdaptor } from "loro-adaptors";
 
@@ -39,7 +41,8 @@ interface PendingRoom {
 
 interface InternalRoomHandler {
   handleDocUpdate(updates: Uint8Array[]): void;
-  handleUpdateError(error: UpdateError): void;
+  handleAck(ack: Ack): void;
+  handleRoomError(error: RoomError): void;
 }
 
 interface ActiveRoom {
@@ -59,6 +62,12 @@ type NodeProcessLike = {
   off?: (event: string, listener: () => void) => unknown;
   removeListener?: (event: string, listener: () => void) => unknown;
 };
+
+function randomBatchId(): HexString {
+  const bytes = new Uint8Array(8);
+  crypto.getRandomValues(bytes);
+  return bytesToHex(bytes);
+}
 
 /**
  * The websocket client's high-level connection status.
@@ -636,15 +645,20 @@ export class LoroWebsocketClient {
         this.handleFragment(msg);
         break;
       }
-      case MessageType.UpdateError: {
+      case MessageType.RoomError: {
         const active = this.activeRooms.get(roomId);
         if (active) {
-          active.handler.handleUpdateError(msg);
-        } else {
-          const roomIdStr = msg.roomId;
-          console.error(
-            `Update error for room ${roomIdStr}: ${msg.code} - ${msg.message}`
-          );
+          active.handler.handleRoomError(msg);
+        }
+        // Remove local room state so client can rejoin explicitly
+        this.cleanupRoom(msg.roomId, msg.crdt);
+        this.emitRoomStatus(roomId, RoomJoinStatus.Error);
+        break;
+      }
+      case MessageType.Ack: {
+        const active = this.activeRooms.get(roomId);
+        if (active) {
+          active.handler.handleAck(msg);
         }
         break;
       }
@@ -664,17 +678,17 @@ export class LoroWebsocketClient {
     // Set up timeout (10 seconds default)
     const timeoutId = setTimeout(() => {
       this.fragmentBatches.delete(batchKey);
-      // Send timeout error
+      // Notify server to prompt resend
       try {
         if (this.ws && this.ws.readyState === WebSocket.OPEN) {
           this.ws.send(
             encode({
-              type: MessageType.UpdateError,
+              type: MessageType.Ack,
               crdt: msg.crdt,
               roomId: msg.roomId,
-              code: UpdateErrorCode.FragmentTimeout,
-              message: `Fragment reassembly timeout for batch ${msg.batchId}`,
-            } as UpdateError)
+              refId: msg.batchId,
+              status: UpdateStatusCode.FragmentTimeout,
+            } as Ack)
           );
         }
       } catch { }
@@ -938,15 +952,6 @@ export class LoroWebsocketClient {
         },
         onImportError: (error: Error, data: Uint8Array[]) => {
           console.error(`Import error: ${error.message}`, data);
-          this.ws.send(
-            encode({
-              type: MessageType.UpdateError,
-              crdt: crdtAdaptor.crdtType,
-              roomId,
-              code: UpdateErrorCode.AppError,
-              message: error.message,
-            } as UpdateError)
-          );
         },
       });
       // Create room and register before invoking adaptor.handleJoinOk to ensure
@@ -1050,6 +1055,8 @@ export class LoroWebsocketClient {
       Math.min(240 * 1024, MAX_MESSAGE_SIZE - 4096)
     );
 
+    const batchId = randomBatchId();
+
     if (update.length <= FRAG_LIMIT) {
       // Send as a single DocUpdate with one update entry
       ws.send(
@@ -1058,6 +1065,7 @@ export class LoroWebsocketClient {
           crdt,
           roomId,
           updates: [update],
+          batchId,
         } as DocUpdate)
       );
       return;
@@ -1065,9 +1073,6 @@ export class LoroWebsocketClient {
 
     // Fragment the update into multiple DocUpdateFragment messages
     const fragmentCount = Math.ceil(update.length / FRAG_LIMIT);
-    const batchBytes = new Uint8Array(8); // 8-byte batch ID per protocol
-    crypto.getRandomValues(batchBytes);
-    const batchId = bytesToHex(batchBytes);
 
     const header: DocUpdateFragmentHeader = {
       type: MessageType.DocUpdateFragmentHeader,
@@ -1432,8 +1437,25 @@ class LoroWebsocketClientRoomImpl
     this.crdtAdaptor.applyUpdate(updates);
   }
 
-  handleUpdateError(error: UpdateError) {
-    this.crdtAdaptor.handleUpdateError?.(error);
+  handleAck(ack: Ack) {
+    // Prefer dedicated handlers; otherwise warn when a non-ok status arrives.
+    if (this.crdtAdaptor.handleAck) {
+      this.crdtAdaptor.handleAck(ack);
+      return;
+    }
+    if (this.crdtAdaptor.handleUpdateStatus) {
+      this.crdtAdaptor.handleUpdateStatus(ack);
+      return;
+    }
+    if (ack.status !== UpdateStatusCode.Ok) {
+      console.warn(`Ack status ${ack.status} for ${this.crdtType}:${this.roomId} (ref ${ack.refId})`);
+    }
+  }
+
+  handleRoomError(error: RoomError) {
+    this.crdtAdaptor.handleRoomError?.(error);
+    // Default action: mark as disconnected so app can rejoin explicitly.
+    this.destroyed = true;
   }
 
   async leave() {

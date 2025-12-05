@@ -32,7 +32,7 @@ pnpm -r clean
 Source of truth: `/protocol.md`.
 
 - Envelope: 4‑byte CRDT magic, varBytes roomId (≤128B), 1‑byte type, payload
-- Types: JoinRequest/JoinResponseOk/JoinError, DocUpdate, DocUpdateFragmentHeader/Fragment, UpdateError, Leave
+- Types: JoinRequest/JoinResponseOk/JoinError, DocUpdate (with batchId), DocUpdateFragmentHeader/Fragment, Ack, RoomError, Leave
 - Limits: 256 KiB per message; fragment large updates
 - Keepalive: connection‑scoped text frames "ping"/"pong"
 
@@ -45,7 +45,7 @@ Key TS files: `packages/loro-protocol/src/{bytes,encoding,protocol}.ts`.
 
 ## Notes for Implementers
 
-- Fragmentation: reassemble fragments by batch header + index; timeout triggers UpdateError.FragmentTimeout
+- Fragmentation: reassemble fragments by batch header + index; timeout triggers Ack.FragmentTimeout
 - Rooms: a WS connection can join multiple CRDT+room pairs
 - Auth/persistence hooks exposed by `SimpleServer` and Rust server
 

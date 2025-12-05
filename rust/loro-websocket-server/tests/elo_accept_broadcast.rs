@@ -1,6 +1,6 @@
 use loro_websocket_client::Client;
 use loro_websocket_server as server;
-use loro_websocket_server::protocol::{self as proto, CrdtType};
+use loro_websocket_server::protocol::{self as proto, BatchId, CrdtType};
 use std::sync::Arc;
 
 #[tokio::test(flavor = "current_thread")]
@@ -82,6 +82,7 @@ async fn elo_accepts_join_and_broadcasts_updates() {
         crdt: CrdtType::Elo,
         room_id: room_id.clone(),
         updates: vec![opaque_update.clone()],
+        batch_id: BatchId([3, 3, 3, 3, 3, 3, 3, 3]),
     };
     c1.send(&du).await.unwrap();
 
@@ -92,6 +93,7 @@ async fn elo_accepts_join_and_broadcasts_updates() {
             crdt,
             room_id: rid,
             updates,
+            batch_id: _,
         }) = c2.next().await.unwrap()
         {
             if matches!(crdt, CrdtType::Elo) && rid == room_id && updates.len() == 1 {

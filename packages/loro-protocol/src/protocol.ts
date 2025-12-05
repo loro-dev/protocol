@@ -41,8 +41,9 @@ export const MessageType = {
   DocUpdate: 0x03,
   DocUpdateFragmentHeader: 0x04,
   DocUpdateFragment: 0x05,
-  UpdateError: 0x06,
+  RoomError: 0x06,
   Leave: 0x07,
+  Ack: 0x08,
 } as const;
 export type MessageType = (typeof MessageType)[keyof typeof MessageType];
 
@@ -54,8 +55,14 @@ export const JoinErrorCode = {
 } as const;
 export type JoinErrorCode = (typeof JoinErrorCode)[keyof typeof JoinErrorCode];
 
-export const UpdateErrorCode = {
-  Unknown: 0x00,
+export const RoomErrorCode = {
+  Unknown: 0x01,
+} as const;
+export type RoomErrorCode = (typeof RoomErrorCode)[keyof typeof RoomErrorCode];
+
+export const UpdateStatusCode = {
+  Ok: 0x00,
+  Unknown: 0x01,
   PermissionDenied: 0x03,
   InvalidUpdate: 0x04,
   PayloadTooLarge: 0x05,
@@ -63,8 +70,8 @@ export const UpdateErrorCode = {
   FragmentTimeout: 0x07,
   AppError: 0x7f,
 } as const;
-export type UpdateErrorCode =
-  (typeof UpdateErrorCode)[keyof typeof UpdateErrorCode];
+export type UpdateStatusCode =
+  (typeof UpdateStatusCode)[keyof typeof UpdateStatusCode];
 
 export type RoomId = string;
 
@@ -98,6 +105,7 @@ export interface JoinError extends MessageBase {
 export interface DocUpdate extends MessageBase {
   type: typeof MessageType.DocUpdate;
   updates: Uint8Array[];
+  batchId: HexString;
 }
 
 export type HexString = `0x${string}`;
@@ -115,12 +123,16 @@ export interface DocUpdateFragment extends MessageBase {
   fragment: Uint8Array;
 }
 
-export interface UpdateError extends MessageBase {
-  type: typeof MessageType.UpdateError;
-  code: UpdateErrorCode;
+export interface RoomError extends MessageBase {
+  type: typeof MessageType.RoomError;
+  code: RoomErrorCode;
   message: string;
-  batchId?: HexString;
-  appCode?: string;
+}
+
+export interface Ack extends MessageBase {
+  type: typeof MessageType.Ack;
+  refId: HexString; // Update Batch ID or Fragment batch ID
+  status: UpdateStatusCode;
 }
 
 export function hexToBytes(hex: HexString): Uint8Array {
@@ -150,5 +162,6 @@ export type ProtocolMessage =
   | DocUpdate
   | DocUpdateFragmentHeader
   | DocUpdateFragment
-  | UpdateError
-  | Leave;
+  | RoomError
+  | Leave
+  | Ack;

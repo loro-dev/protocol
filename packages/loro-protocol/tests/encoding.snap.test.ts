@@ -4,7 +4,8 @@ import {
   CrdtType,
   MessageType,
   JoinErrorCode,
-  UpdateErrorCode,
+  UpdateStatusCode,
+  RoomErrorCode,
   bytesToHex,
   type JoinRequest,
   type JoinResponseOk,
@@ -12,7 +13,8 @@ import {
   type DocUpdate,
   type DocUpdateFragmentHeader,
   type DocUpdateFragment,
-  type UpdateError,
+  type RoomError,
+  type Ack,
   type Leave,
 } from "../src/protocol";
 
@@ -20,6 +22,7 @@ import {
 
 describe("encoding snapshots", () => {
   const roomId = "room-1234";
+  const batchId = "0x0102030405060708";
 
   it("JoinRequest", () => {
     const msg: JoinRequest = {
@@ -100,6 +103,7 @@ describe("encoding snapshots", () => {
         new Uint8Array([4, 5, 6, 7]),
         new Uint8Array([8]),
       ],
+      batchId,
     };
     expect(bytesToHex(encode(msg))).toMatchSnapshot();
   });
@@ -130,37 +134,35 @@ describe("encoding snapshots", () => {
     expect(bytesToHex(encode(msg))).toMatchSnapshot();
   });
 
-  it("UpdateError permission denied", () => {
-    const msg: UpdateError = {
-      type: MessageType.UpdateError,
+  it("RoomError eviction", () => {
+    const msg: RoomError = {
+      type: MessageType.RoomError,
       crdt: CrdtType.Loro,
       roomId,
-      code: UpdateErrorCode.PermissionDenied,
-      message: "No write permission",
+      code: RoomErrorCode.Unknown,
+      message: "evicted",
     };
     expect(bytesToHex(encode(msg))).toMatchSnapshot();
   });
 
-  it("UpdateError fragment timeout with batchId", () => {
-    const msg: UpdateError = {
-      type: MessageType.UpdateError,
+  it("Ack ok", () => {
+    const msg: Ack = {
+      type: MessageType.Ack,
+      crdt: CrdtType.Loro,
+      roomId,
+      refId: batchId,
+      status: UpdateStatusCode.Ok,
+    };
+    expect(bytesToHex(encode(msg))).toMatchSnapshot();
+  });
+
+  it("Ack fragment timeout", () => {
+    const msg: Ack = {
+      type: MessageType.Ack,
       crdt: CrdtType.YjsAwareness,
       roomId,
-      code: UpdateErrorCode.FragmentTimeout,
-      message: "Fragment timeout",
-      batchId: "0x0100000000000000",
-    };
-    expect(bytesToHex(encode(msg))).toMatchSnapshot();
-  });
-
-  it("UpdateError app error with appCode", () => {
-    const msg: UpdateError = {
-      type: MessageType.UpdateError,
-      crdt: CrdtType.Loro,
-      roomId,
-      code: UpdateErrorCode.AppError,
-      message: "Custom app error",
-      appCode: "custom_code_123",
+      refId: "0x0100000000000000",
+      status: UpdateStatusCode.FragmentTimeout,
     };
     expect(bytesToHex(encode(msg))).toMatchSnapshot();
   });
