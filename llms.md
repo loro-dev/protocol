@@ -278,7 +278,7 @@ The resolved room implements:
   to stay within limits.
 - On receiving `DocUpdate`/fragments, the client reassembles updates and passes
   them to `crdtAdaptor.applyUpdate`.
-- `Ack` messages invoke `crdtAdaptor.handleAck`/`handleUpdateStatus` if provided; non‑zero statuses indicate the update batch was rejected.
+- `Ack` messages are logged; non‑zero statuses indicate the update batch was rejected.
 
 ### 3.8 Ping/Pong Integration
 

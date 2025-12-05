@@ -808,9 +808,6 @@ export class LoroWebsocketClient {
     pending: PendingRoom,
     roomId: string
   ) {
-    // First, let adaptor handle the error for custom logic
-    await pending.adaptor.handleJoinErr?.(msg);
-
     if (msg.code === JoinErrorCode.VersionUnknown) {
       // Try alternative version format
       const currentVersion = pending.adaptor.getVersion();
@@ -1485,22 +1482,12 @@ class LoroWebsocketClientRoomImpl
   }
 
   handleAck(ack: Ack) {
-    // Prefer dedicated handlers; otherwise warn when a non-ok status arrives.
-    if (this.crdtAdaptor.handleAck) {
-      this.crdtAdaptor.handleAck(ack);
-      return;
-    }
-    if (this.crdtAdaptor.handleUpdateStatus) {
-      this.crdtAdaptor.handleUpdateStatus(ack);
-      return;
-    }
     if (ack.status !== UpdateStatusCode.Ok) {
       console.warn(`Ack status ${ack.status} for ${this.crdtType}:${this.roomId} (ref ${ack.refId})`);
     }
   }
 
   handleRoomError(error: RoomError) {
-    this.crdtAdaptor.handleRoomError?.(error);
     // Only mark destroyed for terminal errors; rejoin-suggested errors keep the room alive for retry.
     if (error.code !== RoomErrorCode.RejoinSuggested) {
       this.destroyed = true;

@@ -1,10 +1,4 @@
-import {
-  CrdtType,
-  JoinResponseOk,
-  JoinError,
-  Ack,
-  RoomError,
-} from "loro-protocol";
+import { CrdtType, JoinResponseOk } from "loro-protocol";
 
 export interface CrdtDocAdaptor {
   crdtType: CrdtType;
@@ -45,16 +39,8 @@ export interface CrdtDocAdaptor {
   getAlternativeVersion?: (
     currentVersion: Uint8Array
   ) => Uint8Array | undefined;
-  /**
-   * Handle update status/acks with context-specific logic
-   * @param ack The ack details
-   */
-  handleAck?: (ack: Ack) => void;
-  handleUpdateStatus?: (ack: Ack) => void;
-  handleRoomError?: (err: RoomError) => void;
   // Legacy hook retained for compatibility
   handleUpdateError?: (error: unknown) => void;
-  handleJoinErr?: (err: JoinError) => Promise<void>;
   destroy: () => void;
 }
 

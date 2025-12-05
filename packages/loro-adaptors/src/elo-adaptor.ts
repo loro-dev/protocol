@@ -2,9 +2,6 @@ import { LoroDoc, VersionVector, decodeImportBlobMeta } from "loro-crdt";
 import {
   CrdtType,
   JoinResponseOk,
-  Ack,
-  RoomError,
-  UpdateStatusCode,
 } from "loro-protocol";
 import type { CrdtAdaptorContext, CrdtDocAdaptor } from "./types";
 import {
@@ -27,10 +24,6 @@ export interface EloAdaptorConfig {
     err: Error,
     meta: { kind: "delta" | "snapshot"; keyId: string }
   ) => void;
-  onAck?: (ack: Ack) => void;
-  onUpdateStatus?: (ack: Ack) => void;
-  onRoomError?: (err: RoomError) => void;
-  onUpdateError?: (ack: Ack) => void; // legacy naming
 }
 
 export class EloAdaptor implements CrdtDocAdaptor {
@@ -231,18 +224,6 @@ export class EloAdaptor implements CrdtDocAdaptor {
         this.reachServerVersionPromise.resolve();
       }
     }
-  }
-
-  handleAck(ack: Ack): void {
-    this.config.onAck?.(ack);
-    if (ack.status !== UpdateStatusCode.Ok) {
-      this.config.onUpdateStatus?.(ack);
-      this.config.onUpdateError?.(ack);
-    }
-  }
-
-  handleRoomError(err: RoomError): void {
-    this.config.onRoomError?.(err);
   }
 
   destroy(): void {
