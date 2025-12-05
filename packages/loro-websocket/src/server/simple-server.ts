@@ -493,7 +493,7 @@ export class SimpleServer {
     }
 
     const batch = {
-      data: new Array<Uint8Array>(message.fragmentCount),
+      data: Array.from({ length: message.fragmentCount }, () => new Uint8Array()),
       totalSize: message.totalSizeBytes,
       received: 0,
       header: message,

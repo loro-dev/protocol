@@ -941,7 +941,7 @@ describe("E2E: RoomError rejoin policy", () => {
 
     expect(joinCount).toBe(1);
 
-    await client.destroy();
+    client.destroy();
     wss.close();
   }, 5000);
 
@@ -998,7 +998,7 @@ describe("E2E: RoomError rejoin policy", () => {
     await new Promise(r => setTimeout(r, 200));
     expect(joinCount).toBe(2);
 
-    await client.destroy();
+    client.destroy();
     wss.close();
   }, 8000);
 });
