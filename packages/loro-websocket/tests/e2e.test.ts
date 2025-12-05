@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { WebSocket, WebSocketServer } from "ws";
+import type { RawData } from "ws";
 import getPort from "get-port";
 import { SimpleServer } from "../src/server/simple-server";
 import { LoroWebsocketClient, ClientStatus } from "../src/client";
@@ -1127,8 +1128,13 @@ async function waitUntil(
   throw new Error("Condition not met within timeout");
 }
 
-function toUint8Array(data: Buffer | ArrayBuffer | ArrayBufferView | string): Uint8Array {
+function toUint8Array(data: RawData | string): Uint8Array {
   if (typeof data === "string") return new TextEncoder().encode(data);
+  if (Array.isArray(data)) {
+    // RawData can be Buffer[] when `ws` aggregates chunks
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-argument
+    return toUint8Array(Buffer.concat(data as Buffer[]));
+  }
   if (data instanceof ArrayBuffer) return new Uint8Array(data);
   if (ArrayBuffer.isView(data)) return new Uint8Array(data.buffer, data.byteOffset, data.byteLength);
   // Buffer from ws in Node
