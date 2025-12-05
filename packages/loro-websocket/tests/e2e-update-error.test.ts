@@ -51,7 +51,11 @@ describe("E2E: onUpdateError", () => {
         client.terminate();
       } catch { }
     }
-    await new Promise(resolve => server.close(() => resolve(undefined)));
+    await new Promise<void>(resolve => {
+      server.close(() => {
+        resolve();
+      });
+    });
   });
 
   it("invokes adaptor onUpdateError with original batch", async () => {
@@ -81,7 +85,7 @@ describe("E2E: onUpdateError", () => {
     expect(err.reason).toBe("invalid_update");
     expect(err.updates.length).toBe(1);
     expect(lastUpdates.length).toBe(1);
-    expect(err.updates[0]!.length).toBeGreaterThan(0);
+    expect((err.updates[0]?.length ?? 0)).toBeGreaterThan(0);
 
     await room.destroy();
     client.destroy();
@@ -90,7 +94,7 @@ describe("E2E: onUpdateError", () => {
   function handleMessage(ws: WebSocket, msg: ProtocolMessage) {
     switch (msg.type) {
       case MessageType.JoinRequest: {
-        const jr = msg as JoinRequest;
+        const jr: JoinRequest = msg;
         ws.send(
           encode({
             type: MessageType.JoinResponseOk,
