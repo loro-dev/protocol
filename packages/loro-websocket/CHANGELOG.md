@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.4.3](https://github.com/loro-dev/protocol/compare/loro-websocket-v0.4.2...loro-websocket-v0.4.3) (2025-12-05)
+
+
+### Bug Fixes
+
+* refine websocket client reconnect ([#31](https://github.com/loro-dev/protocol/issues/31)) ([d130f42](https://github.com/loro-dev/protocol/commit/d130f424384252e62ab02b9cff06a35ec75be59c))
+
 ## [0.4.2](https://github.com/loro-dev/protocol/compare/loro-websocket-v0.4.1...loro-websocket-v0.4.2) (2025-11-28)
 
 
