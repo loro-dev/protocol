@@ -138,6 +138,12 @@ export type RoomJoinStatusValue =
  */
 export class LoroWebsocketClient {
   private ws!: WebSocket;
+  // Invariant: `connectedPromise` always represents the next transition to `Connected`.
+  // - It resolves exactly once, when the currently active socket fires `open`.
+  // - It is replaced (via `ensureConnectedPromise`) whenever we start a new connect
+  //   attempt or a reconnect is scheduled, so callers blocking on `waitConnected()`
+  //   will wait for the next successful connection.
+  // - It rejects only when we deliberately stop reconnecting (`close()` or fatal close).
   private connectedPromise!: Promise<void>;
   private resolveConnected?: () => void;
   private rejectConnected?: (e: Error) => void;
@@ -463,6 +469,8 @@ export class LoroWebsocketClient {
       this.failAllPendingRooms(err, this.shouldReconnect ? RoomJoinStatus.Reconnecting : RoomJoinStatus.Disconnected);
       return;
     }
+    // Renew the promise so callers waiting on waitConnected() block until the next successful reconnect.
+    this.ensureConnectedPromise();
     // Start (or continue) exponential backoff retries
     this.setStatus(ClientStatus.Disconnected);
     this.scheduleReconnect();
