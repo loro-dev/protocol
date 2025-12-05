@@ -9,7 +9,9 @@ pub struct BytesWriter {
 impl BytesWriter {
     #[must_use]
     pub fn new() -> Self {
-        Self { buf: Vec::with_capacity(32) }
+        Self {
+            buf: Vec::with_capacity(32),
+        }
     }
 
     #[inline]
@@ -54,15 +56,21 @@ impl BytesWriter {
 
     #[inline]
     #[must_use]
-    pub fn len(&self) -> usize { self.buf.len() }
+    pub fn len(&self) -> usize {
+        self.buf.len()
+    }
 
     #[inline]
     #[must_use]
-    pub fn is_empty(&self) -> bool { self.buf.is_empty() }
+    pub fn is_empty(&self) -> bool {
+        self.buf.is_empty()
+    }
 }
 
 impl Default for BytesWriter {
-    fn default() -> Self { Self::new() }
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 pub struct BytesReader<'a> {
@@ -72,11 +80,15 @@ pub struct BytesReader<'a> {
 
 impl<'a> BytesReader<'a> {
     #[must_use]
-    pub fn new(buf: &'a [u8]) -> Self { Self { buf, off: 0 } }
+    pub fn new(buf: &'a [u8]) -> Self {
+        Self { buf, off: 0 }
+    }
 
     #[inline]
     #[must_use]
-    pub fn remaining(&self) -> usize { self.buf.len().saturating_sub(self.off) }
+    pub fn remaining(&self) -> usize {
+        self.buf.len().saturating_sub(self.off)
+    }
 
     pub fn read_byte(&mut self) -> Result<u8, String> {
         if self.off >= self.buf.len() {
@@ -88,10 +100,14 @@ impl<'a> BytesReader<'a> {
     }
 
     pub fn read_bytes(&mut self, len: usize) -> Result<&'a [u8], String> {
-        if self.off.checked_add(len).is_some_and(|e| e <= self.buf.len()) {
+        if self
+            .off
+            .checked_add(len)
+            .is_some_and(|e| e <= self.buf.len())
+        {
             let start = self.off;
             self.off += len;
-            Ok(&self.buf[start..start+len])
+            Ok(&self.buf[start..start + len])
         } else {
             Err("readBytes out of bounds".into())
         }
@@ -104,16 +120,20 @@ impl<'a> BytesReader<'a> {
         loop {
             let byte = self.read_byte()?;
             result |= u64::from(byte & 0x7f) << shift;
-            if (byte & 0x80) == 0 { break; }
+            if (byte & 0x80) == 0 {
+                break;
+            }
             shift += 7;
-            if shift > 63 { return Err("uleb128 too large".into()); }
+            if shift > 63 {
+                return Err("uleb128 too large".into());
+            }
         }
         Ok(result)
     }
 
     pub fn read_var_bytes(&mut self) -> Result<&'a [u8], String> {
-        let len = usize::try_from(self.read_uleb128()?)
-            .map_err(|_| "length too large".to_string())?;
+        let len =
+            usize::try_from(self.read_uleb128()?).map_err(|_| "length too large".to_string())?;
         self.read_bytes(len)
     }
 
@@ -126,7 +146,9 @@ impl<'a> BytesReader<'a> {
 
     /// Current cursor position (number of bytes consumed so far).
     #[inline]
-    pub fn position(&self) -> usize { self.off }
+    pub fn position(&self) -> usize {
+        self.off
+    }
 }
 
 #[cfg(test)]
@@ -136,14 +158,31 @@ mod tests {
     #[test]
     fn round_trip_uleb128() {
         let values: [u64; 14] = [
-            0, 1, 2, 10, 127, 128, 129, 255, 256, 16383, 16384, 0xffff, 0x1f_ffff, 0x0fff_ffff,
+            0,
+            1,
+            2,
+            10,
+            127,
+            128,
+            129,
+            255,
+            256,
+            16383,
+            16384,
+            0xffff,
+            0x1f_ffff,
+            0x0fff_ffff,
         ];
         let mut w = BytesWriter::new();
-        for &n in &values { w.push_uleb128(n); }
+        for &n in &values {
+            w.push_uleb128(n);
+        }
         let buf = w.finalize();
         let mut r = BytesReader::new(&buf);
         let mut out = Vec::new();
-        for _ in 0..values.len() { out.push(r.read_uleb128().unwrap()); }
+        for _ in 0..values.len() {
+            out.push(r.read_uleb128().unwrap());
+        }
         assert_eq!(out, values);
         assert_eq!(r.remaining(), 0);
     }
@@ -151,9 +190,11 @@ mod tests {
     #[test]
     fn round_trip_varbytes_and_varstring() {
         let empty: Vec<u8> = vec![];
-        let small: Vec<u8> = vec![1,2,3,4,5];
+        let small: Vec<u8> = vec![1, 2, 3, 4, 5];
         let mut large: Vec<u8> = vec![0; 5000];
-        for (i, b) in large.iter_mut().enumerate() { *b = (i & 0xff) as u8; }
+        for (i, b) in large.iter_mut().enumerate() {
+            *b = (i & 0xff) as u8;
+        }
 
         let mut w = BytesWriter::new();
         w.push_var_bytes(&empty);

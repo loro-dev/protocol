@@ -12,12 +12,18 @@ fn encode_crdt(w: &mut BytesWriter, crdt: CrdtType) {
 }
 
 fn decode_crdt(r: &mut BytesReader) -> Result<CrdtType, String> {
-    if r.remaining() < 4 { return Err("Invalid message: too short for CRDT type".into()); }
+    if r.remaining() < 4 {
+        return Err("Invalid message: too short for CRDT type".into());
+    }
     let bytes = r.read_bytes(4)?;
     let mut arr = [0u8; 4];
     arr.copy_from_slice(bytes);
-    CrdtType::from_magic_bytes(arr).ok_or_else(|| format!("Invalid CRDT type: {}{}{}{}",
-        arr[0] as char, arr[1] as char, arr[2] as char, arr[3] as char))
+    CrdtType::from_magic_bytes(arr).ok_or_else(|| {
+        format!(
+            "Invalid CRDT type: {}{}{}{}",
+            arr[0] as char, arr[1] as char, arr[2] as char, arr[3] as char
+        )
+    })
 }
 
 fn encode_permission(w: &mut BytesWriter, p: Permission) {
@@ -46,16 +52,59 @@ pub fn encode(message: &ProtocolMessage) -> Result<Vec<u8>, String> {
 
     // Common: crdt, room_id, type
     match message {
-        ProtocolMessage::JoinRequest { crdt, room_id, auth: _, version: _ }
-        | ProtocolMessage::JoinResponseOk { crdt, room_id, permission: _, version: _, extra: _ }
-        | ProtocolMessage::JoinError { crdt, room_id, code: _, message: _, receiver_version: _, app_code: _ }
-        | ProtocolMessage::DocUpdate { crdt, room_id, updates: _ }
-        | ProtocolMessage::DocUpdateFragmentHeader { crdt, room_id, batch_id: _, fragment_count: _, total_size_bytes: _ }
-        | ProtocolMessage::DocUpdateFragment { crdt, room_id, batch_id: _, index: _, fragment: _ }
-        | ProtocolMessage::UpdateError { crdt, room_id, code: _, message: _, batch_id: _, app_code: _ }
+        ProtocolMessage::JoinRequest {
+            crdt,
+            room_id,
+            auth: _,
+            version: _,
+        }
+        | ProtocolMessage::JoinResponseOk {
+            crdt,
+            room_id,
+            permission: _,
+            version: _,
+            extra: _,
+        }
+        | ProtocolMessage::JoinError {
+            crdt,
+            room_id,
+            code: _,
+            message: _,
+            receiver_version: _,
+            app_code: _,
+        }
+        | ProtocolMessage::DocUpdate { crdt, room_id, .. }
+        | ProtocolMessage::DocUpdateFragmentHeader {
+            crdt,
+            room_id,
+            batch_id: _,
+            fragment_count: _,
+            total_size_bytes: _,
+        }
+        | ProtocolMessage::DocUpdateFragment {
+            crdt,
+            room_id,
+            batch_id: _,
+            index: _,
+            fragment: _,
+        }
+        | ProtocolMessage::RoomError {
+            crdt,
+            room_id,
+            code: _,
+            message: _,
+        }
+        | ProtocolMessage::Ack {
+            crdt,
+            room_id,
+            ref_id: _,
+            status: _,
+        }
         | ProtocolMessage::Leave { crdt, room_id } => {
             let room_id_bytes = room_id.as_bytes();
-            if room_id_bytes.len() > MAX_ROOM_ID_LENGTH { return Err("Room ID too long".into()); }
+            if room_id_bytes.len() > MAX_ROOM_ID_LENGTH {
+                return Err("Room ID too long".into());
+            }
             encode_crdt(&mut w, *crdt);
             w.push_var_bytes(room_id_bytes);
         }
@@ -67,9 +116,12 @@ pub fn encode(message: &ProtocolMessage) -> Result<Vec<u8>, String> {
         ProtocolMessage::JoinResponseOk { .. } => MessageType::JoinResponseOk as u8,
         ProtocolMessage::JoinError { .. } => MessageType::JoinError as u8,
         ProtocolMessage::DocUpdate { .. } => MessageType::DocUpdate as u8,
-        ProtocolMessage::DocUpdateFragmentHeader { .. } => MessageType::DocUpdateFragmentHeader as u8,
+        ProtocolMessage::DocUpdateFragmentHeader { .. } => {
+            MessageType::DocUpdateFragmentHeader as u8
+        }
         ProtocolMessage::DocUpdateFragment { .. } => MessageType::DocUpdateFragment as u8,
-        ProtocolMessage::UpdateError { .. } => MessageType::UpdateError as u8,
+        ProtocolMessage::RoomError { .. } => MessageType::RoomError as u8,
+        ProtocolMessage::Ack { .. } => MessageType::Ack as u8,
         ProtocolMessage::Leave { .. } => MessageType::Leave as u8,
     };
     w.push_byte(ty);
@@ -80,44 +132,77 @@ pub fn encode(message: &ProtocolMessage) -> Result<Vec<u8>, String> {
             w.push_var_bytes(auth);
             w.push_var_bytes(version);
         }
-        ProtocolMessage::JoinResponseOk { permission, version, extra, .. } => {
+        ProtocolMessage::JoinResponseOk {
+            permission,
+            version,
+            extra,
+            ..
+        } => {
             encode_permission(&mut w, *permission);
             w.push_var_bytes(version);
-            if let Some(e) = extra { w.push_var_bytes(e); } else { w.push_var_bytes(&[]); }
+            if let Some(e) = extra {
+                w.push_var_bytes(e);
+            } else {
+                w.push_var_bytes(&[]);
+            }
         }
-        ProtocolMessage::JoinError { code, message, receiver_version, app_code, .. } => {
+        ProtocolMessage::JoinError {
+            code,
+            message,
+            receiver_version,
+            app_code,
+            ..
+        } => {
             w.push_byte(*code as u8);
             w.push_var_string(message);
             if matches!(code, JoinErrorCode::VersionUnknown) {
-                if let Some(v) = receiver_version { w.push_var_bytes(v); }
+                if let Some(v) = receiver_version {
+                    w.push_var_bytes(v);
+                }
             }
             if matches!(code, JoinErrorCode::AppError) {
-                if let Some(app) = app_code { w.push_var_string(app); }
+                if let Some(app) = app_code {
+                    w.push_var_string(app);
+                }
             }
         }
-        ProtocolMessage::DocUpdate { updates, .. } => {
+        ProtocolMessage::DocUpdate {
+            updates, batch_id, ..
+        } => {
             w.push_uleb128(updates.len() as u64);
-            for u in updates { w.push_var_bytes(u); }
+            for u in updates {
+                w.push_var_bytes(u);
+            }
+            // Append 8-byte Update Batch ID (fixed width for hot-path parsing)
+            w.push_bytes(&batch_id.0);
         }
-        ProtocolMessage::DocUpdateFragmentHeader { batch_id, fragment_count, total_size_bytes, .. } => {
+        ProtocolMessage::DocUpdateFragmentHeader {
+            batch_id,
+            fragment_count,
+            total_size_bytes,
+            ..
+        } => {
             w.push_bytes(&batch_id.0);
             w.push_uleb128(*fragment_count);
             w.push_uleb128(*total_size_bytes);
         }
-        ProtocolMessage::DocUpdateFragment { batch_id, index, fragment, .. } => {
+        ProtocolMessage::DocUpdateFragment {
+            batch_id,
+            index,
+            fragment,
+            ..
+        } => {
             w.push_bytes(&batch_id.0);
             w.push_uleb128(*index);
             w.push_var_bytes(fragment);
         }
-        ProtocolMessage::UpdateError { code, message, batch_id, app_code, .. } => {
+        ProtocolMessage::RoomError { code, message, .. } => {
             w.push_byte(*code as u8);
             w.push_var_string(message);
-            if matches!(code, UpdateErrorCode::FragmentTimeout) {
-                if let Some(id) = batch_id { w.push_bytes(&id.0); }
-            }
-            if matches!(code, UpdateErrorCode::AppError) {
-                if let Some(app) = app_code { w.push_var_string(app); }
-            }
+        }
+        ProtocolMessage::Ack { ref_id, status, .. } => {
+            w.push_bytes(&ref_id.0);
+            w.push_byte(*status as u8);
         }
         ProtocolMessage::Leave { .. } => {}
     }
@@ -126,7 +211,8 @@ pub fn encode(message: &ProtocolMessage) -> Result<Vec<u8>, String> {
     if out.len() > MAX_MESSAGE_SIZE {
         return Err(format!(
             "Message size {} exceeds maximum {}",
-            out.len(), MAX_MESSAGE_SIZE
+            out.len(),
+            MAX_MESSAGE_SIZE
         ));
     }
     Ok(out)
@@ -152,68 +238,142 @@ pub fn decode(buf: &[u8]) -> Result<ProtocolMessage, String> {
         MessageType::JoinRequest => {
             let auth = r.read_var_bytes()?.to_vec();
             let version = r.read_var_bytes()?.to_vec();
-            PM::JoinRequest { crdt, room_id, auth, version }
+            PM::JoinRequest {
+                crdt,
+                room_id,
+                auth,
+                version,
+            }
         }
         MessageType::JoinResponseOk => {
             let permission = decode_permission(&mut r)?;
             let version = r.read_var_bytes()?.to_vec();
             let extra = r.read_var_bytes()?.to_vec();
-            PM::JoinResponseOk { crdt, room_id, permission, version, extra: Some(extra) }
+            PM::JoinResponseOk {
+                crdt,
+                room_id,
+                permission,
+                version,
+                extra: Some(extra),
+            }
         }
         MessageType::JoinError => {
-            let code = r.read_byte().ok().and_then(JoinErrorCode::from_u8).unwrap_or(JoinErrorCode::Unknown);
+            let code = r
+                .read_byte()
+                .ok()
+                .and_then(JoinErrorCode::from_u8)
+                .unwrap_or(JoinErrorCode::Unknown);
             let message = r.read_var_string()?;
             let mut receiver_version = None;
             let mut app_code = None;
             if matches!(code, JoinErrorCode::VersionUnknown) && r.remaining() > 0 {
-                if let Ok(bytes) = r.read_var_bytes() { receiver_version = Some(bytes.to_vec()); }
+                if let Ok(bytes) = r.read_var_bytes() {
+                    receiver_version = Some(bytes.to_vec());
+                }
             }
             if matches!(code, JoinErrorCode::AppError) && r.remaining() > 0 {
-                if let Ok(app) = r.read_var_string() { app_code = Some(app); }
+                if let Ok(app) = r.read_var_string() {
+                    app_code = Some(app);
+                }
             }
-            PM::JoinError { crdt, room_id, code, message, receiver_version, app_code }
+            PM::JoinError {
+                crdt,
+                room_id,
+                code,
+                message,
+                receiver_version,
+                app_code,
+            }
         }
         MessageType::DocUpdate => {
             let count = r.read_uleb128()? as usize;
             let mut updates = Vec::with_capacity(count);
-            for _ in 0..count { updates.push(r.read_var_bytes()?.to_vec()); }
-            PM::DocUpdate { crdt, room_id, updates }
+            for _ in 0..count {
+                updates.push(r.read_var_bytes()?.to_vec());
+            }
+            if r.remaining() < 8 {
+                return Err("Invalid DocUpdate: missing batch ID".into());
+            }
+            let id = r.read_bytes(8)?;
+            let mut arr = [0u8; 8];
+            arr.copy_from_slice(id);
+            let batch_id = BatchId(arr);
+            PM::DocUpdate {
+                crdt,
+                room_id,
+                updates,
+                batch_id,
+            }
         }
         MessageType::DocUpdateFragmentHeader => {
-            if r.remaining() < 8 { return Err("Invalid DocUpdateFragmentHeader: missing batch ID".into()); }
+            if r.remaining() < 8 {
+                return Err("Invalid DocUpdateFragmentHeader: missing batch ID".into());
+            }
             let id = r.read_bytes(8)?;
             let mut arr = [0u8; 8];
             arr.copy_from_slice(id);
             let batch_id = BatchId(arr);
             let fragment_count = r.read_uleb128()?;
             let total_size_bytes = r.read_uleb128()?;
-            PM::DocUpdateFragmentHeader { crdt, room_id, batch_id, fragment_count, total_size_bytes }
+            PM::DocUpdateFragmentHeader {
+                crdt,
+                room_id,
+                batch_id,
+                fragment_count,
+                total_size_bytes,
+            }
         }
         MessageType::DocUpdateFragment => {
-            if r.remaining() < 8 { return Err("Invalid DocUpdateFragment: missing batch ID".into()); }
+            if r.remaining() < 8 {
+                return Err("Invalid DocUpdateFragment: missing batch ID".into());
+            }
             let id = r.read_bytes(8)?;
             let mut arr = [0u8; 8];
             arr.copy_from_slice(id);
             let batch_id = BatchId(arr);
             let index = r.read_uleb128()?;
             let fragment = r.read_var_bytes()?.to_vec();
-            PM::DocUpdateFragment { crdt, room_id, batch_id, index, fragment }
+            PM::DocUpdateFragment {
+                crdt,
+                room_id,
+                batch_id,
+                index,
+                fragment,
+            }
         }
-        MessageType::UpdateError => {
-            let code = r.read_byte().ok().and_then(UpdateErrorCode::from_u8).unwrap_or(UpdateErrorCode::Unknown);
+        MessageType::RoomError => {
+            let code = r
+                .read_byte()
+                .ok()
+                .and_then(RoomErrorCode::from_u8)
+                .unwrap_or(RoomErrorCode::Unknown);
             let message = r.read_var_string()?;
-            let mut batch_id = None;
-            let mut app_code = None;
-            if matches!(code, UpdateErrorCode::FragmentTimeout) && r.remaining() >= 8 {
-                let id = r.read_bytes(8)?;
-                let mut arr = [0u8; 8];
-                arr.copy_from_slice(id);
-                batch_id = Some(BatchId(arr));
+            PM::RoomError {
+                crdt,
+                room_id,
+                code,
+                message,
             }
-            if matches!(code, UpdateErrorCode::AppError) && r.remaining() > 0 {
-                if let Ok(app) = r.read_var_string() { app_code = Some(app); }
+        }
+        MessageType::Ack => {
+            if r.remaining() < 9 {
+                return Err("Invalid Ack: missing fields".into());
             }
-            PM::UpdateError { crdt, room_id, code, message, batch_id, app_code }
+            let id = r.read_bytes(8)?;
+            let mut arr = [0u8; 8];
+            arr.copy_from_slice(id);
+            let ref_id = BatchId(arr);
+            let status = r
+                .read_byte()
+                .ok()
+                .and_then(UpdateStatusCode::from_u8)
+                .unwrap_or(UpdateStatusCode::Unknown);
+            PM::Ack {
+                crdt,
+                room_id,
+                ref_id,
+                status,
+            }
         }
         MessageType::Leave => PM::Leave { crdt, room_id },
     };
@@ -247,15 +407,20 @@ mod tests {
             crdt: CrdtType::Yjs,
             room_id: "room-123".to_string(),
             permission: Permission::Read,
-            version: vec![10,20],
+            version: vec![10, 20],
             extra: None,
         };
         let enc = encode(&msg).unwrap();
         let dec = decode(&enc).unwrap();
         match dec {
-            ProtocolMessage::JoinResponseOk { permission, version, extra, .. } => {
+            ProtocolMessage::JoinResponseOk {
+                permission,
+                version,
+                extra,
+                ..
+            } => {
                 assert!(matches!(permission, Permission::Read));
-                assert_eq!(version, vec![10,20]);
+                assert_eq!(version, vec![10, 20]);
                 // decoder reads varBytes even if empty is encoded
                 assert_eq!(extra.unwrap_or_default(), Vec::<u8>::new());
             }
@@ -284,6 +449,7 @@ mod tests {
             crdt: CrdtType::Loro,
             room_id: "room-oversized".into(),
             updates: vec![big_update],
+            batch_id: BatchId([0; 8]),
         };
         let err = encode(&msg).unwrap_err();
         assert!(err.contains("exceeds maximum"));

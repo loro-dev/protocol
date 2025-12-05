@@ -14,7 +14,10 @@ fn hex_to_bytes(s: &str) -> Vec<u8> {
 
 fn bytes_to_hex(bytes: &[u8]) -> String {
     let mut s = String::from("0x");
-    for b in bytes { use std::fmt::Write; let _ = write!(s, "{:02x}", b); }
+    for b in bytes {
+        use std::fmt::Write;
+        let _ = write!(s, "{:02x}", b);
+    }
     s
 }
 

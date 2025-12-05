@@ -83,7 +83,7 @@ Notes:
 
 - The server MUST be able to parse `kind`, version metadata (`peerId/start/end` for delta or `vv` for snapshot), `iv`, and `keyId` without decrypting `ct`.
 - The CRDT bytes (Loro updates or snapshot encoding) are entirely inside `ct` and only readable by clients with the correct key.
-- Field bounds: Implementations SHOULD reject records with `peerId` > 64 bytes or `keyId` > 64 UTF‑8 bytes with `UpdateError.invalid_update`. Oversized messages remain subject to the 256 KB limit (`payload_too_large`).
+- Field bounds: Implementations SHOULD reject records with `peerId` > 64 bytes or `keyId` > 64 UTF‑8 bytes with `Ack.status=invalid_update`. Oversized messages remain subject to the 256 KB limit (`payload_too_large`).
 
 ### AEAD AAD and IV
 
@@ -116,7 +116,7 @@ Although the server cannot decrypt, it SHOULD index the plaintext headers for ef
 - Storage model: `Map<PeerID, Array<Span>>` where each Span is `[start,end)` with associated `keyId` and raw `record` bytes. Spans are kept sorted by `start`.
 - Dedup/merge (Span Override): On receiving a new DeltaSpan for `peerId = P` with span `[S,E)`, replace only if the new span fully covers existing spans for the same `peerId` (i.e., for each covered span `[s,e)`, `S ≤ s` and `E ≥ e`). This replacement is based solely on version metadata and applies regardless of `keyId`.
 - Querying: Given a requester version vector `VV`, send all delta spans where `end > VV[peerId]` (i.e., spans that extend beyond the requester’s counter for that `peerId`).
-- Validation: Servers SHOULD validate header encodings (e.g., `end > start`, for DeltaSpan plaintext, `iv` length == 12, recommended `peerId`/`keyId` bounds) and reject malformed updates with `UpdateError.invalid_update`. Over‑limit payloads SHOULD be rejected with `UpdateError.payload_too_large`.
+- Validation: Servers SHOULD validate header encodings (e.g., `end > start`, for DeltaSpan plaintext, `iv` length == 12, recommended `peerId`/`keyId` bounds) and reject malformed updates with `Ack.status=invalid_update`. Over‑limit payloads SHOULD be rejected with `Ack.status=payload_too_large`.
 - Snapshots: On receiving a snapshot record, applications MAY choose to replace prior stored deltas according to their retention policy (e.g., keep a window of recent deltas). Authorization for snapshot override is an application concern.
 
 The server MUST treat `keyId` as opaque metadata and MUST NOT rely on or require any specific format.
@@ -131,7 +131,7 @@ type GetPrivateKey = (keyId?: string) => Promise<{ keyId: string; key: Uint8Arra
 
 - Export: when sending, export CRDT updates as contiguous spans per peer, encrypt each span into a DeltaSpan record, then encode into the container.
 - Import: when receiving, parse the container, for each record read the explicit `iv`, build AAD from the exact encoded header, decrypt `ct`, and batch‑import the plaintext updates/snapshot into the CRDT.
-- Unknown key handling: If a record’s `keyId` is unknown, clients SHOULD fetch/resolve the key and retry decryption. If resolution fails or decryption fails with a known key, surface a local error (do not emit `UpdateError`).
+- Unknown key handling: If a record’s `keyId` is unknown, clients SHOULD fetch/resolve the key and retry decryption. If resolution fails or decryption fails with a known key, surface a local error (no Ack is emitted because the server is unaware).
 
 Key rotation is handled by publishing new records with a new `keyId`. Receivers that encounter an unknown `keyId` must obtain the key via application logic and then retry decryption.
 
@@ -143,7 +143,7 @@ Key rotation is handled by publishing new records with a new `keyId`. Receivers 
 ## Errors and Telemetry
 
 - Client‑local decrypt failures: Report via a local callback (e.g., `onError({ kind: 'decrypt_failed' | 'unknown_key', peerId, start, end, keyId })`). Servers cannot detect these.
-- Server rejections: Map header validation issues to `UpdateError.invalid_update`; size over limits to `UpdateError.payload_too_large`; fragment timeout behavior is unchanged from the base protocol.
+- Server rejections: Map header validation issues to `Ack.status=invalid_update`; size over limits to `Ack.status=payload_too_large`; fragment timeout behavior is unchanged from the base protocol.
 - Observability: For debugging, servers SHOULD log anonymized header fields (e.g., `peerId`, `start`, `end`, `keyId`) and high‑level outcomes. Servers MUST NOT log `ct` contents.
 
 ## Normative Test Vector (DeltaSpan)

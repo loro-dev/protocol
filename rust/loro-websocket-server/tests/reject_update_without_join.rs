@@ -1,6 +1,6 @@
 use loro_websocket_client::Client;
 use loro_websocket_server as server;
-use loro_websocket_server::protocol::{self as proto, CrdtType};
+use loro_websocket_server::protocol::{self as proto, BatchId, CrdtType, UpdateStatusCode};
 use std::sync::Arc;
 
 #[tokio::test(flavor = "current_thread")]
@@ -25,19 +25,20 @@ async fn reject_update_without_join() {
         crdt: CrdtType::Loro,
         room_id: "room-no-join".to_string(),
         updates: vec![vec![1, 2, 3]],
+        batch_id: BatchId([2, 2, 2, 2, 2, 2, 2, 2]),
     };
     c.send(&msg).await.unwrap();
 
-    // Expect UpdateError.PermissionDenied
+    // Expect Ack.PermissionDenied
     let mut got_err = false;
     for _ in 0..3 {
-        if let Some(proto::ProtocolMessage::UpdateError { code, .. }) = c.next().await.unwrap() {
-            assert!(matches!(code, proto::UpdateErrorCode::PermissionDenied));
+        if let Some(proto::ProtocolMessage::Ack { status, .. }) = c.next().await.unwrap() {
+            assert!(matches!(status, UpdateStatusCode::PermissionDenied));
             got_err = true;
             break;
         }
     }
-    assert!(got_err, "did not receive UpdateError.PermissionDenied");
+    assert!(got_err, "did not receive Ack.PermissionDenied");
 
     server_task.abort();
 }

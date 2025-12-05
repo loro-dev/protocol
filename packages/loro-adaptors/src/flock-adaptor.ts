@@ -1,9 +1,7 @@
 import { Flock } from "@loro-dev/flock";
 import {
   CrdtType,
-  JoinError,
   JoinResponseOk,
-  UpdateError,
 } from "loro-protocol";
 import type { CrdtAdaptorContext, CrdtDocAdaptor } from "./types";
 
@@ -97,7 +95,11 @@ function deserializeBundle(bytes: Uint8Array): FlockExportBundle {
 
 export interface FlockAdaptorConfig {
   onImportError?: (error: Error, data: Uint8Array[]) => void;
-  onUpdateError?: (error: UpdateError) => void;
+  onUpdateError?: (
+    updates: Uint8Array[],
+    errorCode: number,
+    reason?: string
+  ) => void;
 }
 
 /**
@@ -147,8 +149,6 @@ export class FlockAdaptor implements CrdtDocAdaptor {
     return compareVersions(this.flock.version(), remote);
   }
 
-  handleJoinErr?: (err: JoinError) => Promise<void>;
-
   setCtx(ctx: CrdtAdaptorContext): void {
     this.ctx = ctx;
     if (this.unsubscribe) {
@@ -172,6 +172,14 @@ export class FlockAdaptor implements CrdtDocAdaptor {
 
   getAlternativeVersion(): Uint8Array | undefined {
     return undefined;
+  }
+
+  onUpdateError(
+    updates: Uint8Array[],
+    errorCode: number,
+    reason?: string
+  ): void {
+    this.config.onUpdateError?.(updates, errorCode, reason);
   }
 
   async handleJoinOk(res: JoinResponseOk): Promise<void> {
@@ -226,10 +234,6 @@ export class FlockAdaptor implements CrdtDocAdaptor {
         this.markReachedServerVersion();
       }
     }
-  }
-
-  handleUpdateError(error: UpdateError): void {
-    this.config.onUpdateError?.(error);
   }
 
   destroy(): void {

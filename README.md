@@ -2,7 +2,7 @@
 
 loro-protocol is a small, transport-agnostic syncing protocol for collaborative CRDT documents. This repo hosts the protocol implementation, a WebSocket client, and minimal servers for local testing or self‑hosting.
 
-- Protocol: multiplex multiple rooms on one connection, 256 KiB max per message, large update fragmentation supported
+- Protocol: multiplex multiple rooms on one connection, 256 KiB max per message, large update fragmentation supported, positive/negative delivery via `Ack`, room eviction via `RoomError`
 - CRDTs: Loro document, Loro ephemeral store; extensible (e.g., Yjs, Yjs Awareness)
 - Transports: WebSocket or any integrity-preserving transport (e.g., WebRTC)
 
@@ -158,7 +158,7 @@ The Rust workspace contains a minimal async WebSocket server (`loro-websocket-se
 ## Protocol Highlights
 
 - Magic bytes per CRDT: "%LOR" (Loro doc), "%EPH" (Loro ephemeral), "%EPS" (persisted Loro ephemeral – tells the server to keep the latest state so new peers can load it immediately), "%YJS", "%YAW", …
-- Messages: JoinRequest/JoinResponseOk/JoinError, DocUpdate, DocUpdateFragmentHeader/Fragment, UpdateError, Leave
+- Messages: JoinRequest/JoinResponseOk/JoinError, DocUpdate (with batchId), DocUpdateFragmentHeader/Fragment, Ack, RoomError, Leave
 - Limits: 256 KiB per message; large updates must be fragmented; default reassembly timeout 10s
 - Multi‑room: room ID is part of every message; one connection can join multiple rooms
 

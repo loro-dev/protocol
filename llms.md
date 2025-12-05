@@ -35,11 +35,12 @@ end-to-end encrypted extension, and the full surface of the
 |  `0x00` | `JoinRequest`             | `varBytes joinPayload` (app-defined metadata, e.g., auth/session info), `varBytes version`.      |
 |  `0x01` | `JoinResponseOk`          | `varString permission ("read"/"write")`, `varBytes version`, `varBytes extraMetadata`.           |
 |  `0x02` | `JoinError`               | `u8 code`, `varString message`, optional `varBytes receiverVersion` when `code=version_unknown`. |
-|  `0x03` | `DocUpdate`               | `varUint N` updates followed by `N` `varBytes` chunks.                                           |
+|  `0x03` | `DocUpdate`               | `varUint N` updates followed by `N` `varBytes` chunks, then 8-byte `batchId`.                    |
 |  `0x04` | `DocUpdateFragmentHeader` | `8-byte batchId`, `varUint fragmentCount`, `varUint totalSizeBytes`.                             |
 |  `0x05` | `DocUpdateFragment`       | `8-byte batchId`, `varUint index`, `varBytes fragment`.                                          |
-|  `0x06` | `UpdateError`             | `u8 code`, `varString message`, optional batch ID when `code=fragment_timeout`.                  |
+|  `0x06` | `RoomError`               | `u8 code`, `varString message`; receipt means the peer is evicted from the room until rejoin.    |
 |  `0x07` | `Leave`                   | No additional payload.                                                                           |
+|  `0x08` | `Ack`                     | `8-byte refId` (batch or fragment ID) + `u8 status` (see §1.4).                                  |
 
 ### 1.2 Sync Lifecycle
 
@@ -50,12 +51,14 @@ end-to-end encrypted extension, and the full surface of the
    - or `JoinError` when the join payload is rejected (e.g., auth failure) or
      for unknown version. On `version_unknown`, the server includes its
      version for reseeding.
-3. Clients broadcast local edits using `DocUpdate`. Payloads exceeding the
-   size limit are sliced into fragments: send header first, then numbered
-   fragments. Recipients reassemble by `batchId`.
-4. Clients send `Leave` when unsubscribing from a room.
-5. Servers may emit `UpdateError` when denying updates; clients SHOULD surface
-   these via adaptor callbacks.
+3. Clients broadcast local edits using `DocUpdate` (with an 8-byte `batchId`).
+   Oversize payloads are sliced into fragments: send header first, then
+   numbered fragments. Recipients reassemble by `batchId`.
+4. Server replies with `Ack` for every `DocUpdate`/fragment batch: `status=0`
+   on success, non-zero mirrors legacy `UpdateError` codes.
+5. Clients send `Leave` when unsubscribing from a room.
+6. Servers send `RoomError` to evict a peer from a room; the peer must rejoin
+   to resume traffic.
 
 ### 1.3 Fragmentation Rules
 
@@ -64,24 +67,27 @@ end-to-end encrypted extension, and the full surface of the
   overhead (~240 KiB per fragment in the current implementation).
 - Receivers store fragments per `batchId`, expect all `fragmentCount` entries,
   and enforce a default 10-second reassembly timeout.
-- On timeout (`UpdateError.fragment_timeout`), senders SHOULD resend the full
-  batch (header + fragments).
+- On timeout, receivers send `Ack` with `status=fragment_timeout`; senders
+  SHOULD resend the full batch (header + fragments).
 
-### 1.4 Error Codes
+### 1.4 Status / Error Codes
 
 - **`JoinError` codes:**
   - `0x00 unknown`
   - `0x01 version_unknown` (`receiverVersion` included)
   - `0x02 auth_failed`
   - `0x7F app_error` (`varString app_code`)
-- **`UpdateError` codes:**
-  - `0x00 unknown`
+- **`Ack.status` codes (mirrors legacy `UpdateError`):**
+  - `0x00 ok`
+  - `0x01 unknown`
   - `0x03 permission_denied`
   - `0x04 invalid_update`
   - `0x05 payload_too_large`
   - `0x06 rate_limited`
-  - `0x07 fragment_timeout` (`8-byte batchId`)
-  - `0x7F app_error` (`varString app_code`)
+  - `0x07 fragment_timeout`
+  - `0x7F app_error`
+- **`RoomError` codes:**
+  - `0x01 unknown` (eviction; peer must rejoin)
 - Protocol violations MAY be raised via host callbacks; implementations often
   close the connection on unrecoverable errors.
 
@@ -156,7 +162,7 @@ The server parses headers for routing/deduplication but never decrypts `ct`.
 - Message size remains bounded by the base protocol (use fragments as needed).
 - Receivers SHOULD deduplicate spans via `peerId`/`start`/`end` metadata.
 - Unknown `keyId` SHOULD trigger key resolution and a retry; persistent
-  failure is surfaced locally instead of emitting `UpdateError`.
+  failure is surfaced locally; no Ack is emitted because encryption/auth is end-to-end.
 
 ---
 
@@ -272,7 +278,7 @@ The resolved room implements:
   to stay within limits.
 - On receiving `DocUpdate`/fragments, the client reassembles updates and passes
   them to `crdtAdaptor.applyUpdate`.
-- `UpdateError` messages invoke `crdtAdaptor.handleUpdateError` if provided.
+- `Ack` messages with non‑zero status trigger `crdtAdaptor.onUpdateError(updates, status)` using the original sent batch; missing batches are still logged.
 
 ### 3.8 Ping/Pong Integration
 

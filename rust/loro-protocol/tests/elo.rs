@@ -1,6 +1,13 @@
-use loro_protocol::{bytes::BytesWriter, protocol::CrdtType, elo::*};
+use loro_protocol::{bytes::BytesWriter, elo::*, protocol::CrdtType};
 
-fn make_delta_record(peer: &[u8], start: u64, end: u64, key: &str, iv: &[u8;12], ct: &[u8]) -> Vec<u8> {
+fn make_delta_record(
+    peer: &[u8],
+    start: u64,
+    end: u64,
+    key: &str,
+    iv: &[u8; 12],
+    ct: &[u8],
+) -> Vec<u8> {
     let mut w = BytesWriter::new();
     w.push_byte(EloRecordKind::DeltaSpan as u8);
     w.push_var_bytes(peer);
@@ -15,7 +22,7 @@ fn make_delta_record(peer: &[u8], start: u64, end: u64, key: &str, iv: &[u8;12],
     w2.finalize()
 }
 
-fn make_snapshot_record(vv: &[(&[u8], u64)], key: &str, iv: &[u8;12], ct: &[u8]) -> Vec<u8> {
+fn make_snapshot_record(vv: &[(&[u8], u64)], key: &str, iv: &[u8; 12], ct: &[u8]) -> Vec<u8> {
     let mut w = BytesWriter::new();
     w.push_byte(EloRecordKind::Snapshot as u8);
     w.push_uleb128(vv.len() as u64);
@@ -41,7 +48,7 @@ fn crdt_magic_includes_elo() {
 #[test]
 fn decode_container_and_parse_delta() {
     let peer = b"peer-a";
-    let iv: [u8;12] = [1,2,3,4,5,6,7,8,9,10,11,12];
+    let iv: [u8; 12] = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12];
     let ct: Vec<u8> = vec![0xaa, 0xbb, 0xcc, 0xdd];
     let rec = make_delta_record(peer, 5, 8, "k1", &iv, &ct);
 
@@ -73,7 +80,7 @@ fn decode_container_and_parse_delta() {
 fn parse_snapshot_sorted_vv_and_ct() {
     // Already sorted by peer bytes
     let vv: Vec<(&[u8], u64)> = vec![(b"a", 1), (b"b", 2), (b"zz", 9)];
-    let iv: [u8;12] = [9,9,9,9,9,9,9,9,9,9,9,9];
+    let iv: [u8; 12] = [9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9];
     let ct: Vec<u8> = vec![0x01, 0x02];
     let rec = make_snapshot_record(&vv, "kid", &iv, &ct);
     let parsed = parse_elo_record_header(&rec).expect("parse snapshot");
@@ -97,9 +104,9 @@ fn parse_snapshot_sorted_vv_and_ct() {
 fn invalid_cases() {
     // bad iv length
     let peer = b"p";
-    let ct: Vec<u8> = vec![1,2,3];
+    let ct: Vec<u8> = vec![1, 2, 3];
     let mut iv_bad = [0u8; 12];
-    iv_bad[..8].copy_from_slice(&[1,2,3,4,5,6,7,8]);
+    iv_bad[..8].copy_from_slice(&[1, 2, 3, 4, 5, 6, 7, 8]);
     // Manually construct with 8-byte iv
     let mut w = BytesWriter::new();
     w.push_byte(EloRecordKind::DeltaSpan as u8);
@@ -113,24 +120,50 @@ fn invalid_cases() {
     w2.push_bytes(&hdr);
     w2.push_var_bytes(&ct);
     let rec = w2.finalize();
-    assert!(parse_elo_record_header(&rec).unwrap_err().contains("IV must be 12"));
+    assert!(parse_elo_record_header(&rec)
+        .unwrap_err()
+        .contains("IV must be 12"));
 
     // peer id too long (65 bytes)
     let long_peer = vec![0u8; 65];
-    let rec = make_delta_record(&long_peer, 1, 2, "k", &[1,2,3,4,5,6,7,8,9,10,11,12], &[1]);
-    assert!(parse_elo_record_header(&rec).unwrap_err().contains("peerId too long"));
+    let rec = make_delta_record(
+        &long_peer,
+        1,
+        2,
+        "k",
+        &[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12],
+        &[1],
+    );
+    assert!(parse_elo_record_header(&rec)
+        .unwrap_err()
+        .contains("peerId too long"));
 
     // key id too long (65 ascii)
     let long_key = "A".repeat(65);
-    let rec = make_delta_record(b"p", 1, 2, &long_key, &[1,2,3,4,5,6,7,8,9,10,11,12], &[1]);
-    assert!(parse_elo_record_header(&rec).unwrap_err().contains("keyId too long"));
+    let rec = make_delta_record(
+        b"p",
+        1,
+        2,
+        &long_key,
+        &[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12],
+        &[1],
+    );
+    assert!(parse_elo_record_header(&rec)
+        .unwrap_err()
+        .contains("keyId too long"));
 
     // container trailing bytes
     let mut w = BytesWriter::new();
     w.push_uleb128(1);
-    w.push_var_bytes(&make_delta_record(b"p", 1, 2, "k", &[1,2,3,4,5,6,7,8,9,10,11,12], &[1]));
+    w.push_var_bytes(&make_delta_record(
+        b"p",
+        1,
+        2,
+        "k",
+        &[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12],
+        &[1],
+    ));
     w.push_byte(0xff); // trailing
     let container = w.finalize();
     assert!(decode_elo_container(&container).is_err());
 }
-

@@ -56,7 +56,9 @@ pub fn decode_elo_container<'a>(data: &'a [u8]) -> Result<Vec<&'a [u8]>, String>
     for _ in 0..n {
         out.push(r.read_var_bytes()?);
     }
-    if r.remaining() != 0 { return Err("ELO container has trailing bytes".into()); }
+    if r.remaining() != 0 {
+        return Err("ELO container has trailing bytes".into());
+    }
     Ok(out)
 }
 
@@ -72,7 +74,10 @@ pub fn parse_elo_record_header<'a>(record: &'a [u8]) -> Result<ParsedEloRecord<'
     }
 }
 
-fn parse_delta<'a>(r: &mut BytesReader<'a>, record: &'a [u8]) -> Result<ParsedEloRecord<'a>, String> {
+fn parse_delta<'a>(
+    r: &mut BytesReader<'a>,
+    record: &'a [u8],
+) -> Result<ParsedEloRecord<'a>, String> {
     let peer_id = r.read_var_bytes()?.to_vec();
     let start = r.read_uleb128()?;
     let end = r.read_uleb128()?;
@@ -80,27 +85,47 @@ fn parse_delta<'a>(r: &mut BytesReader<'a>, record: &'a [u8]) -> Result<ParsedEl
     let iv_bytes = r.read_var_bytes()?;
     let aad_len = r.position();
     let ct = r.read_var_bytes()?;
-    if r.remaining() != 0 { return Err("ELO record trailing bytes".into()); }
+    if r.remaining() != 0 {
+        return Err("ELO record trailing bytes".into());
+    }
 
     // Invariants
-    if end <= start { return Err("Invalid ELO delta span: end must be > start".into()); }
-    if iv_bytes.len() != 12 { return Err("Invalid ELO delta span: IV must be 12 bytes".into()); }
-    if peer_id.len() > 64 { return Err("Invalid ELO delta span: peerId too long".into()); }
-    if key_id.as_bytes().len() > 64 { return Err("Invalid ELO delta span: keyId too long".into()); }
+    if end <= start {
+        return Err("Invalid ELO delta span: end must be > start".into());
+    }
+    if iv_bytes.len() != 12 {
+        return Err("Invalid ELO delta span: IV must be 12 bytes".into());
+    }
+    if peer_id.len() > 64 {
+        return Err("Invalid ELO delta span: peerId too long".into());
+    }
+    if key_id.as_bytes().len() > 64 {
+        return Err("Invalid ELO delta span: keyId too long".into());
+    }
 
     let mut iv = [0u8; 12];
     iv.copy_from_slice(iv_bytes);
 
     Ok(ParsedEloRecord {
         kind: EloRecordKind::DeltaSpan,
-        header: EloHeader::Delta(EloDeltaHeader { peer_id, start, end, key_id, iv }),
+        header: EloHeader::Delta(EloDeltaHeader {
+            peer_id,
+            start,
+            end,
+            key_id,
+            iv,
+        }),
         aad: &record[..aad_len],
         ct,
     })
 }
 
-fn parse_snapshot<'a>(r: &mut BytesReader<'a>, record: &'a [u8]) -> Result<ParsedEloRecord<'a>, String> {
-    let count = usize::try_from(r.read_uleb128()?).map_err(|_| "vv length too large".to_string())?;
+fn parse_snapshot<'a>(
+    r: &mut BytesReader<'a>,
+    record: &'a [u8],
+) -> Result<ParsedEloRecord<'a>, String> {
+    let count =
+        usize::try_from(r.read_uleb128()?).map_err(|_| "vv length too large".to_string())?;
     let mut vv: Vec<(Vec<u8>, u64)> = Vec::with_capacity(count);
     for _ in 0..count {
         let pid = r.read_var_bytes()?.to_vec();
@@ -111,12 +136,20 @@ fn parse_snapshot<'a>(r: &mut BytesReader<'a>, record: &'a [u8]) -> Result<Parse
     let iv_bytes = r.read_var_bytes()?;
     let aad_len = r.position();
     let ct = r.read_var_bytes()?;
-    if r.remaining() != 0 { return Err("ELO record trailing bytes".into()); }
+    if r.remaining() != 0 {
+        return Err("ELO record trailing bytes".into());
+    }
 
-    if iv_bytes.len() != 12 { return Err("Invalid ELO snapshot: IV must be 12 bytes".into()); }
-    if key_id.as_bytes().len() > 64 { return Err("Invalid ELO snapshot: keyId too long".into()); }
+    if iv_bytes.len() != 12 {
+        return Err("Invalid ELO snapshot: IV must be 12 bytes".into());
+    }
+    if key_id.as_bytes().len() > 64 {
+        return Err("Invalid ELO snapshot: keyId too long".into());
+    }
     // vv should be sorted by peer_id bytes ascending
-    if !is_sorted_by_bytes(&vv) { return Err("Invalid ELO snapshot: vv not sorted by peer id bytes".into()); }
+    if !is_sorted_by_bytes(&vv) {
+        return Err("Invalid ELO snapshot: vv not sorted by peer id bytes".into());
+    }
 
     let mut iv = [0u8; 12];
     iv.copy_from_slice(iv_bytes);
@@ -142,7 +175,9 @@ fn compare_bytes(a: &[u8], b: &[u8]) -> i32 {
     for i in 0..n {
         let da = a[i];
         let db = b[i];
-        if da != db { return (da as i32) - (db as i32); }
+        if da != db {
+            return (da as i32) - (db as i32);
+        }
     }
     (a.len() as i32) - (b.len() as i32)
 }

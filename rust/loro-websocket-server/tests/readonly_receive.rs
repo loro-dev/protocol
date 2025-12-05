@@ -1,7 +1,9 @@
 use loro as loro_crdt;
 use loro_websocket_client::Client;
 use loro_websocket_server as server;
-use loro_websocket_server::protocol::{self as proto, CrdtType, Permission};
+use loro_websocket_server::protocol::{
+    self as proto, BatchId, CrdtType, Permission, UpdateStatusCode,
+};
 use std::sync::Arc;
 
 #[tokio::test(flavor = "current_thread")]
@@ -77,6 +79,7 @@ async fn readonly_receives_updates_writer_sends() {
         crdt: CrdtType::Loro,
         room_id: room.clone(),
         updates: vec![snap],
+        batch_id: BatchId([1, 1, 1, 1, 1, 1, 1, 1]),
     };
     writer.send(&upd).await.unwrap();
 
@@ -98,18 +101,18 @@ async fn readonly_receives_updates_writer_sends() {
     }
     assert!(got_update, "reader did not receive update");
 
-    // Reader attempts to send an update -> expect UpdateError.PermissionDenied
+    // Reader attempts to send an update -> expect Ack.PermissionDenied
     let upd2 = proto::ProtocolMessage::DocUpdate {
         crdt: CrdtType::Loro,
         room_id: room.clone(),
         updates: vec![vec![1, 2, 3]],
+        batch_id: BatchId([9, 9, 9, 9, 9, 9, 9, 9]),
     };
     reader.send(&upd2).await.unwrap();
     let mut got_err = false;
     for _ in 0..3 {
-        if let Some(proto::ProtocolMessage::UpdateError { code, .. }) = reader.next().await.unwrap()
-        {
-            assert!(matches!(code, proto::UpdateErrorCode::PermissionDenied));
+        if let Some(proto::ProtocolMessage::Ack { status, .. }) = reader.next().await.unwrap() {
+            assert!(matches!(status, UpdateStatusCode::PermissionDenied));
             got_err = true;
             break;
         }

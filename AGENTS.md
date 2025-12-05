@@ -48,7 +48,7 @@ pnpm clean
 ### Protocol Overview
 
 - **CRDT magic bytes**: `%LOR` (Loro), `%EPH` (Ephemeral), `%YJS`, `%YAW`, `%ELO` (E2EE Loro).
-- **Messages**: JoinRequest/JoinResponseOk/JoinError, DocUpdate, DocUpdateFragmentHeader/Fragment, UpdateError, Leave.
+- **Messages**: JoinRequest/JoinResponseOk/JoinError, DocUpdate (with batchId), DocUpdateFragmentHeader/Fragment, Ack, RoomError, Leave.
 - **Limits**: 256 KiB max per message; large payloads are fragmented and reassembled.
 - **Keepalive**: Text frames `"ping"`/`"pong"` are connection‑scoped and bypass the envelope.
 - **%ELO**: DocUpdate payload is a container of encrypted records (DeltaSpan/Snapshot). Each record has a plaintext header (peer/version metadata, `keyId`, 12‑byte IV) and AES‑GCM ciphertext (`ct||tag`). Servers route/broadcast without decrypting.
