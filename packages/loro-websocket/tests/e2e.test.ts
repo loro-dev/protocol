@@ -744,6 +744,80 @@ describe("E2E: Client-Server Sync", () => {
     await server.stop();
   }, 12000);
 
+  it("emits room joined status exactly once for an initial join", async () => {
+    const localPort = await getPort();
+    const localServer = new SimpleServer({ port: localPort });
+    await localServer.start();
+    const client = new LoroWebsocketClient({ url: `ws://localhost:${localPort}` });
+    try {
+      await client.waitConnected();
+      const adaptor = new LoroAdaptor();
+      const statuses: string[] = [];
+      await client.join({
+        roomId: "single-join",
+        crdtAdaptor: adaptor,
+        onStatusChange: s => statuses.push(s),
+      });
+
+      await waitUntil(
+        () => statuses.filter(s => s === "joined").length === 1,
+        5000,
+        25
+      );
+      await new Promise(resolve => setTimeout(resolve, 50));
+      expect(statuses.filter(s => s === "joined").length).toBe(1);
+      expect(statuses[0]).toBe("connecting");
+    } finally {
+      client.destroy();
+      await localServer.stop();
+    }
+  }, 10000);
+
+  it("emits room joined status once per reconnect cycle", async () => {
+    const localPort = await getPort();
+    const localServer = new SimpleServer({ port: localPort });
+    await localServer.start();
+    const client = new LoroWebsocketClient({ url: `ws://localhost:${localPort}` });
+    try {
+      await client.waitConnected();
+      const adaptor = new LoroAdaptor();
+      const statuses: string[] = [];
+      await client.join({
+        roomId: "rejoin-once",
+        crdtAdaptor: adaptor,
+        onStatusChange: s => statuses.push(s),
+      });
+
+      await waitUntil(
+        () => statuses.filter(s => s === "joined").length === 1,
+        5000,
+        25
+      );
+
+      await localServer.stop();
+      await waitUntil(() => statuses.includes("reconnecting"), 5000, 25);
+      await new Promise(resolve => setTimeout(resolve, 200));
+      await localServer.start();
+
+      await waitUntil(
+        () => client.getStatus() === ClientStatus.Connected,
+        8000,
+        50
+      );
+      await waitUntil(
+        () => statuses.filter(s => s === "joined").length === 2,
+        8000,
+        50
+      );
+
+      expect(statuses.filter(s => s === "joined").length).toBe(2);
+      expect(statuses.includes("reconnecting")).toBe(true);
+    } finally {
+      client.destroy();
+      await localServer.stop();
+    }
+  }, 20000);
+
   it("forces reconnect after ping timeout and recovers when pongs return", async () => {
     const pongPort = await getPort();
     const wss = new WebSocketServer({ port: pongPort });

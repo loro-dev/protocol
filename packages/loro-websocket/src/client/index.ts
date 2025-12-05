@@ -289,7 +289,9 @@ export class LoroWebsocketClient {
     // Emit current immediately to inform subscribers
     try {
       cb(this.status);
-    } catch {}
+    } catch (err) {
+      this.logCbError("onStatusChange", err);
+    }
     return () => this.statusListeners.delete(cb);
   }
 
@@ -299,7 +301,9 @@ export class LoroWebsocketClient {
     if (this.lastLatencyMs != null) {
       try {
         cb(this.lastLatencyMs);
-      } catch {}
+      } catch (err) {
+        this.logCbError("onLatency", err);
+      }
     }
     return () => this.latencyListeners.delete(cb);
   }
@@ -311,7 +315,9 @@ export class LoroWebsocketClient {
     for (const cb of listeners) {
       try {
         cb(s);
-      } catch {}
+      } catch (err) {
+        this.logCbError("onStatusChange", err);
+      }
     }
   }
 
@@ -344,9 +350,7 @@ export class LoroWebsocketClient {
 
     this.attachSocketListeners(ws);
 
-    try {
-      ws.binaryType = "arraybuffer";
-    } catch {}
+    ws.binaryType = "arraybuffer";
 
     return this.connectedPromise;
   }
@@ -384,7 +388,7 @@ export class LoroWebsocketClient {
       this.detachSocketListeners(ws);
       try {
         ws.close(1000, "Superseded");
-      } catch {}
+      } catch { }
       return;
     }
     this.clearReconnectTimer();
@@ -424,9 +428,7 @@ export class LoroWebsocketClient {
     // Clear any pending fragment reassembly timers to avoid late callbacks
     if (this.fragmentBatches.size) {
       for (const [, batch] of this.fragmentBatches) {
-        try {
-          clearTimeout(batch.timeoutId);
-        } catch {}
+        clearTimeout(batch.timeoutId);
       }
       this.fragmentBatches.clear();
     }
@@ -476,9 +478,7 @@ export class LoroWebsocketClient {
     }
     if (typeof event.data === "string") {
       if (event.data === "ping") {
-        try {
-          ws.send("pong");
-        } catch {}
+        ws.send("pong");
         return;
       }
       if (event.data === "pong") {
@@ -526,7 +526,7 @@ export class LoroWebsocketClient {
       this.setStatus(ClientStatus.Disconnected);
       try {
         this.ws?.close(1001, "Offline");
-      } catch {}
+      } catch { }
     }
   };
 
@@ -549,10 +549,9 @@ export class LoroWebsocketClient {
               console.error(e);
             })
             .finally(() => {
+              this.pendingRooms.delete(id);
               this.emitRoomStatus(id, RoomJoinStatus.Joined);
             });
-          this.pendingRooms.delete(id);
-          this.emitRoomStatus(id, RoomJoinStatus.Joined);
         },
         reject: (error: Error) => {
           console.error("Rejoin failed:", error);
@@ -669,7 +668,7 @@ export class LoroWebsocketClient {
             } as UpdateError)
           );
         }
-      } catch {}
+      } catch { }
     }, 10000);
 
     this.fragmentBatches.set(batchKey, {
@@ -956,7 +955,6 @@ export class LoroWebsocketClient {
         handler,
         crdtAdaptor
       );
-      this.emitRoomStatus(id, RoomJoinStatus.Joined);
       crdtAdaptor.handleJoinOk(res).catch(e => {
         console.error(e);
       });
@@ -1009,7 +1007,7 @@ export class LoroWebsocketClient {
       for (const [, batch] of this.fragmentBatches) {
         try {
           clearTimeout(batch.timeoutId);
-        } catch {}
+        } catch { }
       }
       this.fragmentBatches.clear();
     }
@@ -1117,7 +1115,7 @@ export class LoroWebsocketClient {
       for (const [, batch] of this.fragmentBatches) {
         try {
           clearTimeout(batch.timeoutId);
-        } catch {}
+        } catch { }
       }
       this.fragmentBatches.clear();
     }
@@ -1130,7 +1128,7 @@ export class LoroWebsocketClient {
     this.detachSocketListeners(ws);
     try {
       this.removeNetworkListeners?.();
-    } catch {}
+    } catch { }
     this.removeNetworkListeners = undefined;
     this.roomStatusListeners.clear();
     // Close websocket after flushing pending frames
@@ -1139,7 +1137,7 @@ export class LoroWebsocketClient {
         code: 1000,
         reason: "Client destroyed",
       });
-    } catch {}
+    } catch { }
     this.setStatus(ClientStatus.Disconnected);
   }
 
@@ -1156,9 +1154,7 @@ export class LoroWebsocketClient {
     };
 
     if (readBufferedAmount() == null) {
-      try {
-        ws.close(code, reason);
-      } catch {}
+      ws.close(code, reason);
       return;
     }
 
@@ -1169,9 +1165,7 @@ export class LoroWebsocketClient {
       const state = ws.readyState;
       if (state === WebSocket.CLOSED || state === WebSocket.CLOSING) {
         requested = true;
-        try {
-          ws.close(code, reason);
-        } catch {}
+        ws.close(code, reason);
         return;
       }
 
@@ -1182,9 +1176,7 @@ export class LoroWebsocketClient {
         Date.now() - start >= timeoutMs
       ) {
         requested = true;
-        try {
-          ws.close(code, reason);
-        } catch {}
+        ws.close(code, reason);
         return;
       }
 
@@ -1203,7 +1195,7 @@ export class LoroWebsocketClient {
       ws.removeEventListener?.("error", handlers.error);
       ws.removeEventListener?.("close", handlers.close);
       ws.removeEventListener?.("message", handlers.message);
-    } catch {}
+    } catch { }
     this.socketListeners.delete(ws);
   }
 
@@ -1223,10 +1215,12 @@ export class LoroWebsocketClient {
         if (this.missedPongs >= 2) {
           try {
             this.ws?.close(1001, "ping_timeout");
-          } catch {}
-          return;
+        } catch (err) {
+          this.logCbError("pingTimer close", err);
         }
+        return;
       }
+    }
       try {
         if (this.ws && this.ws.readyState === WebSocket.OPEN) {
           // Avoid overlapping RTT probes
@@ -1237,7 +1231,9 @@ export class LoroWebsocketClient {
             // Still awaiting a pong; skip sending another ping
           }
         }
-      } catch {}
+      } catch (err) {
+        this.logCbError("pingTimer send", err);
+      }
     }, interval);
   }
 
@@ -1256,7 +1252,9 @@ export class LoroWebsocketClient {
         for (const cb of listeners) {
           try {
             cb(rtt);
-          } catch {}
+          } catch (err) {
+            this.logCbError("onLatency", err);
+          }
         }
       }
       this.awaitingPongSince = undefined;
@@ -1275,7 +1273,7 @@ export class LoroWebsocketClient {
       try {
         clearTimeout(w.timeoutId);
         w.reject(err);
-      } catch {}
+      } catch { }
     }
   }
 
@@ -1320,6 +1318,11 @@ export class LoroWebsocketClient {
     return Math.min(max, Math.max(0, Math.floor(withJitter)));
   }
 
+  private logCbError(context: string, err: unknown) {
+    // eslint-disable-next-line no-console
+    console.error(`[loro-websocket] ${context} callback threw`, err);
+  }
+
   private isFatalClose(code?: number, reason?: string): boolean {
     const policy = this.getReconnectPolicy();
     if (code != null && policy.fatalCloseCodes.includes(code)) return true;
@@ -1353,7 +1356,9 @@ export class LoroWebsocketClient {
     for (const cb of Array.from(set)) {
       try {
         cb(status);
-      } catch {}
+      } catch (err) {
+        this.logCbError("onRoomStatusChange", err);
+      }
     }
   }
 
@@ -1362,13 +1367,13 @@ export class LoroWebsocketClient {
     for (const [id, pending] of entries) {
       try {
         this.emitRoomStatus(id, status);
-      } catch {}
+      } catch { }
       try {
         pending.reject(err);
-      } catch {}
+      } catch { }
       try {
         this.cleanupRoom(pending.roomId, pending.adaptor.crdtType);
-      } catch {}
+      } catch { }
       this.pendingRooms.delete(id);
     }
   }
@@ -1387,8 +1392,7 @@ export interface LoroWebsocketClientRoom {
 }
 
 class LoroWebsocketClientRoomImpl
-  implements LoroWebsocketClientRoom, InternalRoomHandler
-{
+  implements LoroWebsocketClientRoom, InternalRoomHandler {
   private client: LoroWebsocketClient;
   private roomId: string;
   private crdtType: CrdtType;
