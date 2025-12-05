@@ -5,7 +5,6 @@ import {
   Ack,
   RoomError,
   UpdateStatusCode,
-  MessageType,
 } from "loro-protocol";
 import type { CrdtAdaptorContext, CrdtDocAdaptor } from "./types";
 import {
@@ -150,18 +149,8 @@ export class EloAdaptor implements CrdtDocAdaptor {
             await this.sendSnapshot();
           }
         } catch (err) {
-          // Surface failure to host and ack with unknown for visibility.
+          // Surface failure to host.
           console.error("ELO adaptor failed to package/send update", err);
-          const ack: Ack = {
-            type: MessageType.Ack,
-            crdt: this.crdtType,
-            roomId: "",
-            refId: "0x0000000000000000",
-            status: UpdateStatusCode.Unknown,
-          };
-          this.config.onAck?.(ack);
-          this.config.onUpdateStatus?.(ack);
-          this.config.onUpdateError?.(ack);
         }
       })();
     });
