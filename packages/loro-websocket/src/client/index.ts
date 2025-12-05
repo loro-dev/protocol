@@ -179,7 +179,6 @@ export class LoroWebsocketClient {
 
   // Join requests issued while socket is still connecting
   private queuedJoins: Uint8Array[] = [];
-  private readonly maxQueuedJoins = 50;
 
   constructor(private ops: LoroWebsocketClientOptions) {
     this.attachNetworkListeners();
@@ -1331,9 +1330,6 @@ export class LoroWebsocketClient {
   }
 
   private enqueueJoin(payload: Uint8Array) {
-    if (this.queuedJoins.length >= this.maxQueuedJoins) {
-      throw new Error("Too many pending joins; connection not ready");
-    }
     this.queuedJoins.push(payload);
   }
 

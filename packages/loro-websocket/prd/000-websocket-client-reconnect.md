@@ -45,7 +45,7 @@
    - While `navigator.onLine === false`, do not schedule retries. When `online` fires, schedule immediately. No extra backstop timer to keep behavior predictable.
 
 4) **Safer join during connect**
-   - Queue join requests while the socket is CONNECTING; flush on OPEN. (“Pending joins” = `join()` calls made before the socket is ready.) Default queue limit: 50 outstanding joins; beyond that, reject with a clear error so apps can back off.
+   - Queue join requests while the socket is CONNECTING; flush on OPEN. (“Pending joins” = `join()` calls made before the socket is ready.)
 
 5) **Manual reconnect**
    - Add `retryNow()` (alias `connect({ resetBackoff: true })`) to attempt immediately and reset backoff. Also re-enables auto-retry if it had stopped.
@@ -87,4 +87,4 @@
 - Regression: existing e2e reconnection and offline tests must still pass with defaults.
 
 ## Open Questions
-- Is queue limit 50 sufficient, or should it scale with `pendingRooms` size or be user-configurable?
+- Do we need a queue limit or backpressure strategy for joins during CONNECTING, or is unbounded queuing acceptable given typical usage?
