@@ -39,7 +39,7 @@ interface PendingRoom {
   reject: (error: Error) => void;
   adaptor: CrdtDocAdaptor;
   roomId: string;
-  auth?: Uint8Array;
+  auth?: AuthOption;
   isRejoin?: boolean;
 }
 
@@ -618,7 +618,7 @@ export class LoroWebsocketClient {
       },
       adaptor,
       roomId,
-      auth: authValue,
+      auth,
       isRejoin: true,
     };
     this.pendingRooms.set(id, pending);
@@ -839,6 +839,19 @@ export class LoroWebsocketClient {
     roomId: string
   ) {
     if (msg.code === JoinErrorCode.VersionUnknown) {
+      let authValue: Uint8Array;
+      try {
+        authValue = await this.resolveAuth(pending.auth);
+      } catch (e) {
+        pending.reject(e as Error);
+        this.pendingRooms.delete(roomId);
+        this.emitRoomStatus(
+          pending.adaptor.crdtType + pending.roomId,
+          RoomJoinStatus.Error
+        );
+        return;
+      }
+
       // Try alternative version format
       const currentVersion = pending.adaptor.getVersion();
       const alternativeVersion =
@@ -850,7 +863,7 @@ export class LoroWebsocketClient {
             type: MessageType.JoinRequest,
             crdt: pending.adaptor.crdtType,
             roomId: pending.roomId,
-            auth: pending.auth ?? new Uint8Array(),
+            auth: authValue,
             version: alternativeVersion,
           } as JoinRequest)
         );
@@ -862,7 +875,7 @@ export class LoroWebsocketClient {
             type: MessageType.JoinRequest,
             crdt: pending.adaptor.crdtType,
             roomId: pending.roomId,
-            auth: pending.auth ?? new Uint8Array(),
+            auth: authValue,
             version: new Uint8Array(),
           } as JoinRequest)
         );
@@ -939,7 +952,11 @@ export class LoroWebsocketClient {
   }
 
   /**
-   * Join a room; `auth` carries application-defined join metadata forwarded to the server.
+   * Join a room.
+   * - `auth` may be a `Uint8Array` or a provider function.
+   * - The provider is invoked on the initial join and again on protocol-driven retries
+   *   (e.g. `VersionUnknown`) and reconnect rejoins, so it can refresh short-lived tokens.
+   *   If callers need a stable token, memoize in the provider.
    */
   join({
     roomId,
@@ -1036,16 +1053,12 @@ export class LoroWebsocketClient {
       reject: reject!,
       adaptor: crdtAdaptor,
       roomId,
-      auth: undefined,
+      auth,
     });
     this.roomAuth.set(id, auth);
 
     void this.resolveAuth(auth)
       .then(authValue => {
-        const currentPending = this.pendingRooms.get(id);
-        if (!currentPending) return;
-        currentPending.auth = authValue;
-
         const joinPayload = encode({
           type: MessageType.JoinRequest,
           crdt: crdtAdaptor.crdtType,
