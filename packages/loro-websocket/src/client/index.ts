@@ -1029,21 +1029,22 @@ export class LoroWebsocketClient {
       return room;
     });
 
+    // Register pending room immediately so concurrent join calls dedupe
+    this.pendingRooms.set(id, {
+      room,
+      resolve: resolve!,
+      reject: reject!,
+      adaptor: crdtAdaptor,
+      roomId,
+      auth: undefined,
+    });
     this.roomAuth.set(id, auth);
 
-    // Resolve auth before registering pending room to avoid race condition
-    // where JoinError retry might use undefined auth
     void this.resolveAuth(auth)
       .then(authValue => {
-        // Register pending room only after auth is resolved
-        this.pendingRooms.set(id, {
-          room,
-          resolve: resolve!,
-          reject: reject!,
-          adaptor: crdtAdaptor,
-          roomId,
-          auth: authValue,
-        });
+        const currentPending = this.pendingRooms.get(id);
+        if (!currentPending) return;
+        currentPending.auth = authValue;
 
         const joinPayload = encode({
           type: MessageType.JoinRequest,
