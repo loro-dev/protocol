@@ -50,8 +50,6 @@ export interface CrdtDocAdaptor {
     errorCode: number,
     reason?: string
   ) => void;
-  // Legacy hook retained for compatibility
-  handleUpdateError?: (error: unknown) => void;
   destroy: () => void;
 }
 

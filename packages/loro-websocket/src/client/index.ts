@@ -1490,8 +1490,8 @@ class LoroWebsocketClientRoomImpl
     try {
       this.crdtAdaptor.applyUpdate(updates);
     } catch (error) {
-      // Surface to adaptor for custom handling
-      this.crdtAdaptor.handleUpdateError?.(error);
+      // Surface failure for visibility and inform server about invalid batch
+      console.error("Failed to apply remote update", error);
       // Inform server that the update failed if we can reference the batch ID
       if (refId && this.client.socket?.readyState === WebSocket.OPEN) {
         try {
