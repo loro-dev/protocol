@@ -17,33 +17,24 @@ Object.defineProperty(globalThis, "WebSocket", {
 describe("Permission Enforcement", () => {
   let server: SimpleServer;
   let port: number;
-  let skip = false;
 
   beforeAll(async () => {
-    try {
-      port = await getPort();
-      server = new SimpleServer({
-        port,
-        authenticate: async (_roomId, _crdtType, auth) => {
-          const authStr = new TextDecoder().decode(auth);
-          return authStr === "readonly" ? "read" : "write";
-        },
-      });
-      await server.start();
-    } catch (e) {
-      skip = true;
-      console.warn("Skipping permission tests: cannot bind port", e);
-    }
+    port = await getPort();
+    server = new SimpleServer({
+      port,
+      authenticate: async (_roomId, _crdtType, auth) => {
+        const authStr = new TextDecoder().decode(auth);
+        return authStr === "readonly" ? "read" : "write";
+      },
+    });
+    await server.start();
   });
 
   afterAll(async () => {
-    if (!skip && server) {
-      await server.stop();
-    }
+    await server.stop();
   }, 10000);
 
   it("should allow read-only client to receive updates but not send them", async () => {
-    if (skip) return;
     // Create two clients: one with write permission, one with read permission
     const writeClient = new LoroWebsocketClient({
       url: `ws://localhost:${port}`,

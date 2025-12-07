@@ -29,29 +29,18 @@ Object.defineProperty(globalThis, "WebSocket", {
 describe("E2E: Client-Server Sync", () => {
   let server: SimpleServer;
   let port: number;
-  let skip = false;
 
   beforeAll(async () => {
-    try {
-      port = await getPort();
-      server = new SimpleServer({ port });
-      await server.start();
-    } catch (e) {
-      skip = true;
-      console.warn("Skipping e2e tests: cannot bind port", e);
-    }
+    port = await getPort();
+    server = new SimpleServer({ port });
+    await server.start();
   });
 
   afterAll(async () => {
-    if (!skip && server) {
-      await server.stop();
-    }
+    await server.stop();
   }, 15000);
 
   it("should sync two clients through server", async () => {
-    if (skip) return;
-    // Create two clients
-    if (skip) return;
     const client1 = new LoroWebsocketClient({ url: `ws://localhost:${port}` });
     const client2 = new LoroWebsocketClient({ url: `ws://localhost:${port}` });
 
@@ -208,7 +197,6 @@ describe("E2E: Client-Server Sync", () => {
   }, 10000);
 
   it("should resolve ping() with pong", async () => {
-    if (skip) return;
     const client = new LoroWebsocketClient({ url: `ws://localhost:${port}` });
     await client.waitConnected();
 
@@ -217,7 +205,6 @@ describe("E2E: Client-Server Sync", () => {
   }, 10000);
 
   it("emits correct status transitions across reconnects and manual close/connect", async () => {
-    if (skip) return;
     const client = new LoroWebsocketClient({ url: `ws://localhost:${port}` });
 
     const seen: string[] = [];
@@ -443,9 +430,9 @@ describe("E2E: Client-Server Sync", () => {
       await waitUntil(
         () =>
           statuses1.filter(s => s === ClientStatus.Connected).length >
-            initialConnected1 &&
+          initialConnected1 &&
           statuses2.filter(s => s === ClientStatus.Connected).length >
-            initialConnected2,
+          initialConnected2,
         5000,
         25
       );
@@ -658,7 +645,7 @@ describe("E2E: Client-Server Sync", () => {
         setTimeout(() => {
           try {
             ws.close(1008, "policy");
-          } catch {}
+          } catch { }
         }, 30);
       }
     });
@@ -993,7 +980,7 @@ describe("E2E: RoomError rejoin policy", () => {
     const adaptor = new LoroAdaptor();
     await client.join({ roomId: "room-rejoin", crdtAdaptor: adaptor });
 
-    await waitUntil(() => joinCount >= 2, 5000, 20).catch(() => {});
+    await waitUntil(() => joinCount >= 2, 5000, 20).catch(() => { });
     // Ensure no extra rejoins
     await new Promise(r => setTimeout(r, 200));
     expect(joinCount).toBe(2);
