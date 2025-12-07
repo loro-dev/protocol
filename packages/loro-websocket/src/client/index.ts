@@ -1067,7 +1067,6 @@ export class LoroWebsocketClient {
         this.emitRoomStatus(id, RoomJoinStatus.Error);
         reject(error);
         this.cleanupRoom(roomId, crdtAdaptor.crdtType);
-        this.pendingRooms.delete(id);
       });
 
     return room;
