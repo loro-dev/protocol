@@ -613,6 +613,7 @@ export class LoroWebsocketClient {
       },
       reject: (error: Error) => {
         console.error("Rejoin failed:", error);
+        this.pendingRooms.delete(id);
         this.cleanupRoom(roomId, adaptor.crdtType);
         this.emitRoomStatus(id, RoomJoinStatus.Error);
       },
