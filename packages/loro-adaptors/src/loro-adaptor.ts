@@ -118,7 +118,7 @@ export class LoroAdaptor implements CrdtDocAdaptor {
         this.ctx?.send([updates]);
       }
     } catch (error) {
-      this.ctx!.onJoinFailed(
+      this.ctx?.onJoinFailed(
         error instanceof Error ? error.message : String(error)
       );
       throw error;
@@ -138,7 +138,7 @@ export class LoroAdaptor implements CrdtDocAdaptor {
         error instanceof Error ? error : new Error(String(error)),
         updates
       );
-      this.ctx!.onImportError(
+      this.ctx?.onImportError(
         error instanceof Error ? error : new Error(String(error)),
         updates
       );
