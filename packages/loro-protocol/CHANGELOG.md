@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.3.0](https://github.com/loro-dev/protocol/compare/loro-protocol-v0.2.0...loro-protocol-v0.3.0) (2025-12-07)
+
+
+### ⚠ BREAKING CHANGES
+
+* protocol v1 ([#34](https://github.com/loro-dev/protocol/issues/34))
+
+### Features
+
+* protocol v1 ([#34](https://github.com/loro-dev/protocol/issues/34)) ([6570a2e](https://github.com/loro-dev/protocol/commit/6570a2eef0ab73729242adea21052390c39409b3))
+
 ## [0.2.0](https://github.com/loro-dev/protocol/compare/loro-protocol-v0.1.3...loro-protocol-v0.2.0) (2025-11-20)
 
 

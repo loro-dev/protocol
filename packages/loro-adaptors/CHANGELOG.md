@@ -1,5 +1,23 @@
 # Changelog
 
+## [0.5.0](https://github.com/loro-dev/protocol/compare/loro-adaptors-v0.4.2...loro-adaptors-v0.5.0) (2025-12-07)
+
+
+### ⚠ BREAKING CHANGES
+
+* protocol v1 ([#34](https://github.com/loro-dev/protocol/issues/34))
+
+### Features
+
+* protocol v1 ([#34](https://github.com/loro-dev/protocol/issues/34)) ([6570a2e](https://github.com/loro-dev/protocol/commit/6570a2eef0ab73729242adea21052390c39409b3))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * loro-protocol bumped to 0.3.0
+
 ## [0.4.2](https://github.com/loro-dev/protocol/compare/loro-adaptors-v0.4.1...loro-adaptors-v0.4.2) (2025-11-28)
 
 

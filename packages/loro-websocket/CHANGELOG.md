@@ -1,5 +1,25 @@
 # Changelog
 
+## [0.5.0](https://github.com/loro-dev/protocol/compare/loro-websocket-v0.4.3...loro-websocket-v0.5.0) (2025-12-07)
+
+
+### ⚠ BREAKING CHANGES
+
+* protocol v1 ([#34](https://github.com/loro-dev/protocol/issues/34))
+
+### Features
+
+* join room with auth providers ([#37](https://github.com/loro-dev/protocol/issues/37)) ([8a9960a](https://github.com/loro-dev/protocol/commit/8a9960acb172dcfba22af02257fefebc35150c23))
+* protocol v1 ([#34](https://github.com/loro-dev/protocol/issues/34)) ([6570a2e](https://github.com/loro-dev/protocol/commit/6570a2eef0ab73729242adea21052390c39409b3))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * loro-protocol bumped to 0.3.0
+    * loro-adaptors bumped to 0.5.0
+
 ## [0.4.3](https://github.com/loro-dev/protocol/compare/loro-websocket-v0.4.2...loro-websocket-v0.4.3) (2025-12-05)
 
 
