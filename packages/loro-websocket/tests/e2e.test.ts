@@ -571,6 +571,53 @@ describe("E2E: Client-Server Sync", () => {
     await authServer.stop();
   }, 15000);
 
+  it("fetches fresh auth on rejoin when auth provider is used", async () => {
+    const port = await getPort();
+    const tokens: string[] = [];
+
+    const server = new SimpleServer({
+      port,
+      authenticate: async (_roomId, _crdt, auth) => {
+        tokens.push(new TextDecoder().decode(auth));
+        return "write";
+      },
+    });
+    await server.start();
+
+    const client = new LoroWebsocketClient({
+      url: `ws://localhost:${port}`,
+      reconnect: { initialDelayMs: 20, maxDelayMs: 100, jitter: 0 },
+    });
+
+    let room: LoroWebsocketClientRoom | undefined;
+    try {
+      await client.waitConnected();
+      let call = 0;
+      const adaptor = new LoroAdaptor();
+
+      room = await client.join({
+        roomId: "auth-refresh",
+        crdtAdaptor: adaptor,
+        auth: async () => new TextEncoder().encode(`token-${++call}`),
+      });
+
+      await waitUntil(() => tokens.length >= 1, 5000, 25);
+
+      await server.stop();
+      await new Promise(resolve => setTimeout(resolve, 60));
+      await server.start();
+
+      await waitUntil(() => tokens.some(t => t === "token-2"), 10000, 50);
+
+      expect(tokens[0]).toBe("token-1");
+      expect(tokens.some(t => t === "token-2")).toBe(true);
+    } finally {
+      await room?.destroy();
+      client.destroy();
+      await server.stop();
+    }
+  }, 15000);
+
   it("destroy rejects pending ping waiters", async () => {
     const client = new LoroWebsocketClient({ url: `ws://localhost:${port}` });
     await client.waitConnected();
