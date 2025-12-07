@@ -5,6 +5,8 @@ import { SimpleServer } from "../src/server/simple-server";
 import { LoroWebsocketClient } from "../src/client";
 import { LoroAdaptor } from "loro-adaptors/loro";
 
+
+
 // Make WebSocket available globally for the client
 Object.defineProperty(globalThis, "WebSocket", {
   value: WebSocket,
@@ -20,7 +22,7 @@ describe("Permission Enforcement", () => {
     port = await getPort();
     server = new SimpleServer({
       port,
-      authenticate: async (roomId, crdtType, auth) => {
+      authenticate: async (_roomId, _crdtType, auth) => {
         const authStr = new TextDecoder().decode(auth);
         return authStr === "readonly" ? "read" : "write";
       },

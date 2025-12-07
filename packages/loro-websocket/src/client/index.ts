@@ -10,12 +10,15 @@ import {
   JoinError,
   DocUpdateFragmentHeader,
   DocUpdateFragment,
-  UpdateError,
-  UpdateErrorCode,
+  Ack,
+  RoomError,
+  RoomErrorCode,
+  UpdateStatusCode,
   Leave,
   JoinErrorCode,
   MAX_MESSAGE_SIZE,
   bytesToHex,
+  HexString,
 } from "loro-protocol";
 import type { CrdtDocAdaptor } from "loro-adaptors";
 
@@ -38,8 +41,9 @@ interface PendingRoom {
 }
 
 interface InternalRoomHandler {
-  handleDocUpdate(updates: Uint8Array[]): void;
-  handleUpdateError(error: UpdateError): void;
+  handleDocUpdate(updates: Uint8Array[], refId?: HexString): void;
+  handleAck(ack: Ack): void;
+  handleRoomError(error: RoomError): void;
 }
 
 interface ActiveRoom {
@@ -59,6 +63,12 @@ type NodeProcessLike = {
   off?: (event: string, listener: () => void) => unknown;
   removeListener?: (event: string, listener: () => void) => unknown;
 };
+
+function randomBatchId(): HexString {
+  const bytes = new Uint8Array(8);
+  crypto.getRandomValues(bytes);
+  return bytesToHex(bytes);
+}
 
 /**
  * The websocket client's high-level connection status.
@@ -156,7 +166,9 @@ export class LoroWebsocketClient {
   private pendingRooms: Map<string, PendingRoom> = new Map();
   private activeRooms: Map<string, ActiveRoom> = new Map();
   // Buffer for %ELO only: backfills can arrive immediately after JoinResponseOk
-  private preJoinUpdates: Map<string, Uint8Array[]> = new Map();
+  private preJoinUpdates: Map<string, Array<{ updates: Uint8Array[]; refId?: HexString }>> = new Map();
+  // Track outbound update batches so we can surface errors with payload context
+  private sentUpdateBatches: Map<HexString, { roomKey: string; updates: Uint8Array[] }> = new Map();
   private fragmentBatches: Map<string, FragmentBatch> = new Map();
   private roomAdaptors: Map<string, CrdtDocAdaptor> = new Map();
   // Track roomId for each active id so we can rejoin on reconnect
@@ -439,6 +451,10 @@ export class LoroWebsocketClient {
       }
       this.fragmentBatches.clear();
     }
+    // Drop any unacked outbound batches to avoid leaking memory across reconnects
+    if (this.sentUpdateBatches.size) {
+      this.sentUpdateBatches.clear();
+    }
     // Reset any in-flight RTT probe to allow future pings after reconnect
     this.awaitingPongSince = undefined;
     this.ops.onWsClose?.();
@@ -546,49 +562,63 @@ export class LoroWebsocketClient {
       if (!roomId) continue;
       const active = this.activeRooms.get(id);
       if (!active) continue;
-      // Prepare a lightweight pending entry so JoinError handling can retry version formats
-      const roomPromise = Promise.resolve(active.room);
-      const pending: PendingRoom = {
-        room: roomPromise,
-        resolve: (res: JoinResponseOk) => {
-          // On successful rejoin, let adaptor reconcile to server
-          adaptor
-            .handleJoinOk(res)
-            .catch(e => {
-              console.error(e);
-            })
-            .finally(() => {
-              this.pendingRooms.delete(id);
-              this.emitRoomStatus(id, RoomJoinStatus.Joined);
-            });
-        },
-        reject: (error: Error) => {
-          console.error("Rejoin failed:", error);
-          // Remove stale room entry so callers can decide to rejoin manually
-          this.cleanupRoom(roomId, adaptor.crdtType);
-          this.emitRoomStatus(id, RoomJoinStatus.Error);
-        },
-        adaptor,
-        roomId,
-        auth: this.roomAuth.get(id),
-        isRejoin: true,
-      };
-      this.pendingRooms.set(id, pending);
+      this.sendRejoinRequest(id, roomId, adaptor, active.room, this.roomAuth.get(id));
+    }
+  }
 
-      try {
-        this.ws.send(
-          encode({
-            type: MessageType.JoinRequest,
-            crdt: adaptor.crdtType,
-            roomId,
-            auth: pending.auth ?? new Uint8Array(),
-            version: adaptor.getVersion(),
-          } as JoinRequest)
-        );
-        this.emitRoomStatus(id, RoomJoinStatus.Reconnecting);
-      } catch (e) {
-        console.error("Failed to send rejoin request:", e);
+  private sendRejoinRequest(
+    id: string,
+    roomId: string,
+    adaptor: CrdtDocAdaptor,
+    room: LoroWebsocketClientRoom,
+    auth?: Uint8Array
+  ) {
+    // Prepare a lightweight pending entry so JoinError handling can retry version formats
+    const pending: PendingRoom = {
+      room: Promise.resolve(room),
+      resolve: (res: JoinResponseOk) => {
+        adaptor
+          .handleJoinOk(res)
+          .catch(e => {
+            console.error(e);
+          })
+          .finally(() => {
+            this.pendingRooms.delete(id);
+            this.emitRoomStatus(id, RoomJoinStatus.Joined);
+          });
+      },
+      reject: (error: Error) => {
+        console.error("Rejoin failed:", error);
+        this.cleanupRoom(roomId, adaptor.crdtType);
+        this.emitRoomStatus(id, RoomJoinStatus.Error);
+      },
+      adaptor,
+      roomId,
+      auth,
+      isRejoin: true,
+    };
+    this.pendingRooms.set(id, pending);
+
+    const payload = encode({
+      type: MessageType.JoinRequest,
+      crdt: adaptor.crdtType,
+      roomId,
+      auth: auth ?? new Uint8Array(),
+      version: adaptor.getVersion(),
+    } as JoinRequest);
+
+    try {
+      if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+        this.ws.send(payload);
+      } else {
+        this.enqueueJoin(payload);
+        void this.connect();
       }
+      this.emitRoomStatus(id, RoomJoinStatus.Reconnecting);
+    } catch (e) {
+      console.error("Failed to send rejoin request:", e);
+      this.cleanupRoom(roomId, adaptor.crdtType);
+      this.emitRoomStatus(id, RoomJoinStatus.Error);
     }
   }
 
@@ -617,12 +647,12 @@ export class LoroWebsocketClient {
       case MessageType.DocUpdate: {
         const active = this.activeRooms.get(roomId);
         if (active) {
-          active.handler.handleDocUpdate(msg.updates);
+          active.handler.handleDocUpdate(msg.updates, msg.batchId);
         } else {
           const pending = this.pendingRooms.get(roomId);
           if (pending) {
             const buf = this.preJoinUpdates.get(roomId) ?? [];
-            buf.push(...msg.updates);
+            buf.push({ updates: msg.updates, refId: msg.batchId });
             this.preJoinUpdates.set(roomId, buf);
           }
         }
@@ -636,15 +666,29 @@ export class LoroWebsocketClient {
         this.handleFragment(msg);
         break;
       }
-      case MessageType.UpdateError: {
+      case MessageType.RoomError: {
+        const active = this.activeRooms.get(roomId);
+        const adaptor = this.roomAdaptors.get(roomId);
+        const auth = this.roomAuth.get(roomId);
+        const shouldRejoin = msg.code === RoomErrorCode.RejoinSuggested;
+        if (active) {
+          active.handler.handleRoomError(msg);
+        }
+        // Drop any in-flight join since the server explicitly removed us
+        this.pendingRooms.delete(roomId);
+        if (shouldRejoin && active && adaptor) {
+          this.sendRejoinRequest(roomId, msg.roomId, adaptor, active.room, auth);
+        } else {
+          // Remove local room state so client does not auto-retry unless requested
+          this.cleanupRoom(msg.roomId, msg.crdt);
+          this.emitRoomStatus(roomId, RoomJoinStatus.Error);
+        }
+        break;
+      }
+      case MessageType.Ack: {
         const active = this.activeRooms.get(roomId);
         if (active) {
-          active.handler.handleUpdateError(msg);
-        } else {
-          const roomIdStr = msg.roomId;
-          console.error(
-            `Update error for room ${roomIdStr}: ${msg.code} - ${msg.message}`
-          );
+          active.handler.handleAck(msg);
         }
         break;
       }
@@ -664,17 +708,17 @@ export class LoroWebsocketClient {
     // Set up timeout (10 seconds default)
     const timeoutId = setTimeout(() => {
       this.fragmentBatches.delete(batchKey);
-      // Send timeout error
+      // Notify server to prompt resend
       try {
         if (this.ws && this.ws.readyState === WebSocket.OPEN) {
           this.ws.send(
             encode({
-              type: MessageType.UpdateError,
+              type: MessageType.Ack,
               crdt: msg.crdt,
               roomId: msg.roomId,
-              code: UpdateErrorCode.FragmentTimeout,
-              message: `Fragment reassembly timeout for batch ${msg.batchId}`,
-            } as UpdateError)
+              refId: msg.batchId,
+              status: UpdateStatusCode.FragmentTimeout,
+            } as Ack)
           );
         }
       } catch { }
@@ -725,12 +769,12 @@ export class LoroWebsocketClient {
       const active = this.activeRooms.get(id);
       if (active) {
         // Treat reassembled data as a single update
-        active.handler.handleDocUpdate([reassembledData]);
+        active.handler.handleDocUpdate([reassembledData], batch.header.batchId);
       } else {
         const pending = this.pendingRooms.get(id);
         if (pending) {
           const buf = this.preJoinUpdates.get(id) ?? [];
-          buf.push(reassembledData);
+          buf.push({ updates: [reassembledData], refId: batch.header.batchId });
           this.preJoinUpdates.set(id, buf);
         }
       }
@@ -753,7 +797,9 @@ export class LoroWebsocketClient {
     const buf = this.preJoinUpdates.get(id);
     if (buf && buf.length) {
       try {
-        handler.handleDocUpdate(buf);
+        for (const entry of buf) {
+          handler.handleDocUpdate(entry.updates, entry.refId);
+        }
       } finally {
         this.preJoinUpdates.delete(id);
       }
@@ -768,9 +814,6 @@ export class LoroWebsocketClient {
     pending: PendingRoom,
     roomId: string
   ) {
-    // First, let adaptor handle the error for custom logic
-    await pending.adaptor.handleJoinErr?.(msg);
-
     if (msg.code === JoinErrorCode.VersionUnknown) {
       // Try alternative version format
       const currentVersion = pending.adaptor.getVersion();
@@ -819,6 +862,7 @@ export class LoroWebsocketClient {
 
   cleanupRoom(roomId: string, crdtType: CrdtType) {
     const id = crdtType + roomId;
+    this.purgeSentBatchesForRoom(id);
     this.activeRooms.delete(id);
     this.pendingRooms.delete(id);
     this.roomAdaptors.delete(id);
@@ -938,15 +982,6 @@ export class LoroWebsocketClient {
         },
         onImportError: (error: Error, data: Uint8Array[]) => {
           console.error(`Import error: ${error.message}`, data);
-          this.ws.send(
-            encode({
-              type: MessageType.UpdateError,
-              crdt: crdtAdaptor.crdtType,
-              roomId,
-              code: UpdateErrorCode.AppError,
-              message: error.message,
-            } as UpdateError)
-          );
         },
       });
       // Create room and register before invoking adaptor.handleJoinOk to ensure
@@ -1050,6 +1085,14 @@ export class LoroWebsocketClient {
       Math.min(240 * 1024, MAX_MESSAGE_SIZE - 4096)
     );
 
+    const batchId = randomBatchId();
+    const roomKey = `${crdt}${roomId}`;
+    // Store the original payload so we can surface detailed errors on Ack
+    this.sentUpdateBatches.set(batchId, {
+      roomKey,
+      updates: [update.slice()],
+    });
+
     if (update.length <= FRAG_LIMIT) {
       // Send as a single DocUpdate with one update entry
       ws.send(
@@ -1058,6 +1101,7 @@ export class LoroWebsocketClient {
           crdt,
           roomId,
           updates: [update],
+          batchId,
         } as DocUpdate)
       );
       return;
@@ -1065,9 +1109,6 @@ export class LoroWebsocketClient {
 
     // Fragment the update into multiple DocUpdateFragment messages
     const fragmentCount = Math.ceil(update.length / FRAG_LIMIT);
-    const batchBytes = new Uint8Array(8); // 8-byte batch ID per protocol
-    crypto.getRandomValues(batchBytes);
-    const batchId = bytesToHex(batchBytes);
 
     const header: DocUpdateFragmentHeader = {
       type: MessageType.DocUpdateFragmentHeader,
@@ -1107,6 +1148,22 @@ export class LoroWebsocketClient {
     );
   }
 
+  consumeSentBatch(refId: HexString): { roomKey: string; updates: Uint8Array[] } | undefined {
+    const entry = this.sentUpdateBatches.get(refId);
+    if (entry) {
+      this.sentUpdateBatches.delete(refId);
+    }
+    return entry;
+  }
+
+  private purgeSentBatchesForRoom(roomKey: string): void {
+    for (const [refId, entry] of Array.from(this.sentUpdateBatches.entries())) {
+      if (entry.roomKey === roomKey) {
+        this.sentUpdateBatches.delete(refId);
+      }
+    }
+  }
+
   /**
    * Destroy the client, removing listeners and stopping timers.
    * After destroy, the instance should not be used.
@@ -1134,6 +1191,7 @@ export class LoroWebsocketClient {
       this.ops.onWsClose?.();
     }
     this.queuedJoins = [];
+    this.sentUpdateBatches.clear();
     this.detachSocketListeners(ws);
     try {
       this.removeNetworkListeners?.();
@@ -1428,12 +1486,48 @@ class LoroWebsocketClientRoomImpl
     return this.crdtAdaptor.waitForReachingServerVersion();
   }
 
-  handleDocUpdate(updates: Uint8Array[]) {
-    this.crdtAdaptor.applyUpdate(updates);
+  handleDocUpdate(updates: Uint8Array[], refId?: HexString) {
+    try {
+      this.crdtAdaptor.applyUpdate(updates);
+    } catch (error) {
+      // Surface failure for visibility and inform server about invalid batch
+      console.error("Failed to apply remote update", error);
+      // Inform server that the update failed if we can reference the batch ID
+      if (refId && this.client.socket?.readyState === WebSocket.OPEN) {
+        try {
+          this.client.socket.send(
+            encode({
+              type: MessageType.Ack,
+              crdt: this.crdtType,
+              roomId: this.roomId,
+              refId,
+              status: UpdateStatusCode.InvalidUpdate,
+            } as Ack)
+          );
+        } catch (err) {
+          console.error("Failed to send failure Ack", err);
+        }
+      }
+    }
   }
 
-  handleUpdateError(error: UpdateError) {
-    this.crdtAdaptor.handleUpdateError?.(error);
+  handleAck(ack: Ack) {
+    const sent = this.client.consumeSentBatch(ack.refId);
+    if (ack.status !== UpdateStatusCode.Ok) {
+      const updates = sent?.updates ?? [];
+      const reason = updateStatusToReason(ack.status);
+      this.crdtAdaptor.onUpdateError?.(updates, ack.status, reason);
+      if (!sent) {
+        console.warn(`Ack status ${ack.status} for ${this.crdtType}:${this.roomId} (ref ${ack.refId}) with no matching batch`);
+      }
+    }
+  }
+
+  handleRoomError(error: RoomError) {
+    // Only mark destroyed for terminal errors; rejoin-suggested errors keep the room alive for retry.
+    if (error.code !== RoomErrorCode.RejoinSuggested) {
+      this.destroyed = true;
+    }
   }
 
   async leave() {
@@ -1465,6 +1559,27 @@ class LoroWebsocketClientRoomImpl
 }
 
 // --- Keepalive helpers (ping/pong) ---
+
+function updateStatusToReason(status: UpdateStatusCode): string | undefined {
+  switch (status) {
+    case UpdateStatusCode.Unknown:
+      return "unknown";
+    case UpdateStatusCode.PermissionDenied:
+      return "permission_denied";
+    case UpdateStatusCode.InvalidUpdate:
+      return "invalid_update";
+    case UpdateStatusCode.PayloadTooLarge:
+      return "payload_too_large";
+    case UpdateStatusCode.RateLimited:
+      return "rate_limited";
+    case UpdateStatusCode.FragmentTimeout:
+      return "fragment_timeout";
+    case UpdateStatusCode.AppError:
+      return "app_error";
+    default:
+      return undefined;
+  }
+}
 
 // --- Internal ping helpers ---
 function isPositive(v: unknown): v is number {

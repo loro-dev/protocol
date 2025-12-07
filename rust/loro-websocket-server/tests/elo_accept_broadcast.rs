@@ -1,6 +1,7 @@
 use loro_websocket_client::Client;
 use loro_websocket_server as server;
-use loro_websocket_server::protocol::{self as proto, CrdtType};
+use loro_websocket_server::protocol::{self as proto, BatchId, CrdtType};
+use loro_websocket_server::protocol::bytes::BytesWriter;
 use std::sync::Arc;
 
 #[tokio::test(flavor = "current_thread")]
@@ -76,12 +77,13 @@ async fn elo_accepts_join_and_broadcasts_updates() {
         "both clients should receive JoinResponseOk for %ELO"
     );
 
-    // Client 1 sends an opaque %ELO DocUpdate payload (container bytes are irrelevant to the server)
-    let opaque_update: Vec<u8> = vec![0xde, 0xad, 0xbe, 0xef];
+    // Client 1 sends a minimal valid %ELO container (1 delta record)
+    let opaque_update: Vec<u8> = build_minimal_elo_container();
     let du = proto::ProtocolMessage::DocUpdate {
         crdt: CrdtType::Elo,
         room_id: room_id.clone(),
         updates: vec![opaque_update.clone()],
+        batch_id: BatchId([3, 3, 3, 3, 3, 3, 3, 3]),
     };
     c1.send(&du).await.unwrap();
 
@@ -92,6 +94,7 @@ async fn elo_accepts_join_and_broadcasts_updates() {
             crdt,
             room_id: rid,
             updates,
+            batch_id: _,
         }) = c2.next().await.unwrap()
         {
             if matches!(crdt, CrdtType::Elo) && rid == room_id && updates.len() == 1 {
@@ -107,4 +110,23 @@ async fn elo_accepts_join_and_broadcasts_updates() {
     );
 
     server_task.abort();
+}
+
+fn build_minimal_elo_container() -> Vec<u8> {
+    // Record: kind=DeltaSpan, peerId=[1], start=1, end=2, keyId="k1", iv=12 zero bytes, ct=[0]
+    let mut rec = BytesWriter::new();
+    rec.push_byte(0x00);
+    rec.push_var_bytes(&[1]);
+    rec.push_uleb128(1);
+    rec.push_uleb128(2);
+    rec.push_var_string("k1");
+    rec.push_var_bytes(&[0u8; 12]);
+    rec.push_var_bytes(&[0]);
+    let rec_bytes = rec.finalize();
+
+    // Container with 1 record
+    let mut container = BytesWriter::new();
+    container.push_uleb128(1);
+    container.push_var_bytes(&rec_bytes);
+    container.finalize()
 }

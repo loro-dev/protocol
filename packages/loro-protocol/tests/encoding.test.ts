@@ -4,19 +4,22 @@ import {
   CrdtType,
   MessageType,
   JoinErrorCode,
-  UpdateErrorCode,
+  UpdateStatusCode,
+  RoomErrorCode,
   type JoinRequest,
   type JoinResponseOk,
   type JoinError,
   type DocUpdate,
   type DocUpdateFragmentHeader,
   type DocUpdateFragment,
-  type UpdateError,
+  type RoomError,
+  type Ack,
   type Leave,
 } from "../src/protocol";
 
 describe("Message Encoding and Decoding", () => {
   const roomId = "room-123";
+  const batchId = "0x0102030405060708";
 
   describe("JoinRequest", () => {
     it("encodes and decodes JoinRequest correctly", () => {
@@ -177,6 +180,7 @@ describe("Message Encoding and Decoding", () => {
         crdt: CrdtType.Loro,
         roomId,
         updates: [new Uint8Array([111, 222])],
+        batchId,
       };
 
       const encoded = encode(message);
@@ -186,6 +190,7 @@ describe("Message Encoding and Decoding", () => {
       if (decoded.type !== MessageType.DocUpdate) throw new Error("bad type");
       expect(decoded.updates.length).toBe(1);
       expect(Array.from(decoded.updates[0])).toEqual([111, 222]);
+      expect(decoded.batchId).toBe(batchId);
     });
 
     it("encodes and decodes DocUpdate with multiple updates", () => {
@@ -198,6 +203,7 @@ describe("Message Encoding and Decoding", () => {
           new Uint8Array([4, 5, 6, 7]),
           new Uint8Array([8]),
         ],
+        batchId,
       };
 
       const encoded = encode(message);
@@ -209,6 +215,7 @@ describe("Message Encoding and Decoding", () => {
       expect(Array.from(decoded.updates[0])).toEqual([1, 2, 3]);
       expect(Array.from(decoded.updates[1])).toEqual([4, 5, 6, 7]);
       expect(Array.from(decoded.updates[2])).toEqual([8]);
+      expect(decoded.batchId).toBe(batchId);
     });
 
     it("encodes and decodes DocUpdate with empty updates array", () => {
@@ -217,6 +224,7 @@ describe("Message Encoding and Decoding", () => {
         crdt: CrdtType.Loro,
         roomId,
         updates: [],
+        batchId,
       };
 
       const encoded = encode(message);
@@ -225,6 +233,39 @@ describe("Message Encoding and Decoding", () => {
       expect(decoded.type).toBe(MessageType.DocUpdate);
       if (decoded.type !== MessageType.DocUpdate) throw new Error("bad type");
       expect(decoded.updates.length).toBe(0);
+      expect(decoded.batchId).toBe(batchId);
+    });
+
+    it("rejects DocUpdate when batchId is shorter than 8 bytes", () => {
+      const message: DocUpdate = {
+        type: MessageType.DocUpdate,
+        crdt: CrdtType.Loro,
+        roomId,
+        updates: [new Uint8Array([1])],
+        batchId,
+      };
+
+      const encoded = encode(message);
+      const truncated = encoded.slice(0, encoded.length - 1); // drop one batchId byte
+
+      expect(() => decode(truncated)).toThrow(/batch ID/);
+    });
+
+    it("rejects DocUpdate when extra bytes follow the batchId", () => {
+      const message: DocUpdate = {
+        type: MessageType.DocUpdate,
+        crdt: CrdtType.Loro,
+        roomId,
+        updates: [new Uint8Array([1])],
+        batchId,
+      };
+
+      const encoded = encode(message);
+      const withExtra = new Uint8Array(encoded.length + 1);
+      withExtra.set(encoded);
+      withExtra[withExtra.length - 1] = 0xff;
+
+      expect(() => decode(withExtra)).toThrow(/trailing bytes/);
     });
   });
 
@@ -300,92 +341,61 @@ describe("Message Encoding and Decoding", () => {
     });
   });
 
-  describe("UpdateError", () => {
-    it("encodes and decodes UpdateError with permission denied", () => {
-      const message: UpdateError = {
-        type: MessageType.UpdateError,
+  describe("RoomError", () => {
+    it("encodes and decodes RoomError eviction", () => {
+      const message: RoomError = {
+        type: MessageType.RoomError,
         crdt: CrdtType.Loro,
         roomId,
-        code: UpdateErrorCode.PermissionDenied,
-        message: "No write permission",
+        code: RoomErrorCode.Evicted,
+        message: "evicted",
       };
 
       const encoded = encode(message);
       const decoded = decode(encoded);
 
-      expect(decoded.type).toBe(MessageType.UpdateError);
-      if (decoded.type !== MessageType.UpdateError) throw new Error("bad type");
-      expect(decoded.code).toBe(UpdateErrorCode.PermissionDenied);
-      expect(decoded.message).toBe("No write permission");
-      expect(decoded.batchId).toBeUndefined();
-      expect(decoded.appCode).toBeUndefined();
+      expect(decoded.type).toBe(MessageType.RoomError);
+      if (decoded.type !== MessageType.RoomError) throw new Error("bad type");
+      expect(decoded.code).toBe(RoomErrorCode.Evicted);
+      expect(decoded.message).toBe("evicted");
     });
+  });
 
-    it("encodes and decodes UpdateError with fragment timeout", () => {
-      const message: UpdateError = {
-        type: MessageType.UpdateError,
-        crdt: CrdtType.YjsAwareness,
-        roomId,
-        code: UpdateErrorCode.FragmentTimeout,
-        message: "Fragment timeout",
-        batchId: "0x0100000000000000",
-      };
-
-      const encoded = encode(message);
-      const decoded = decode(encoded);
-
-      expect(decoded.type).toBe(MessageType.UpdateError);
-      if (decoded.type !== MessageType.UpdateError) throw new Error("bad type");
-      expect(decoded.code).toBe(UpdateErrorCode.FragmentTimeout);
-      expect(decoded.message).toBe("Fragment timeout");
-      expect(decoded.batchId).toBe("0x0100000000000000");
-    });
-
-    it("encodes and decodes UpdateError with app error", () => {
-      const message: UpdateError = {
-        type: MessageType.UpdateError,
+  describe("Ack", () => {
+    it("encodes and decodes Ack ok", () => {
+      const message: Ack = {
+        type: MessageType.Ack,
         crdt: CrdtType.Loro,
         roomId,
-        code: UpdateErrorCode.AppError,
-        message: "Custom app error",
-        appCode: "custom_code_123",
+        refId: batchId,
+        status: UpdateStatusCode.Ok,
       };
 
       const encoded = encode(message);
       const decoded = decode(encoded);
 
-      expect(decoded.type).toBe(MessageType.UpdateError);
-      if (decoded.type !== MessageType.UpdateError) throw new Error("bad type");
-      expect(decoded.code).toBe(UpdateErrorCode.AppError);
-      expect(decoded.message).toBe("Custom app error");
-      expect(decoded.appCode).toBe("custom_code_123");
+      expect(decoded.type).toBe(MessageType.Ack);
+      if (decoded.type !== MessageType.Ack) throw new Error("bad type");
+      expect(decoded.refId).toBe(batchId);
+      expect(decoded.status).toBe(UpdateStatusCode.Ok);
     });
 
-    it("encodes and decodes UpdateError with various error codes", () => {
-      const errorCodes = [
-        UpdateErrorCode.Unknown,
-        UpdateErrorCode.InvalidUpdate,
-        UpdateErrorCode.PayloadTooLarge,
-        UpdateErrorCode.RateLimited,
-      ];
+    it("encodes and decodes Ack with fragment timeout", () => {
+      const message: Ack = {
+        type: MessageType.Ack,
+        crdt: CrdtType.LoroEphemeralStore,
+        roomId,
+        refId: "0x0000000000000001",
+        status: UpdateStatusCode.FragmentTimeout,
+      };
 
-      for (const code of errorCodes) {
-        const message: UpdateError = {
-          type: MessageType.UpdateError,
-          crdt: CrdtType.Loro,
-          roomId,
-          code,
-          message: `Error with code ${code}`,
-        };
+      const encoded = encode(message);
+      const decoded = decode(encoded);
 
-        const encoded = encode(message);
-        const decoded = decode(encoded);
-        expect(decoded.type).toBe(MessageType.UpdateError);
-        if (decoded.type !== MessageType.UpdateError)
-          throw new Error("bad type");
-        expect(decoded.code).toBe(code);
-        expect(decoded.message).toBe(`Error with code ${code}`);
-      }
+      expect(decoded.type).toBe(MessageType.Ack);
+      if (decoded.type !== MessageType.Ack) throw new Error("bad type");
+      expect(decoded.refId).toBe("0x0000000000000001");
+      expect(decoded.status).toBe(UpdateStatusCode.FragmentTimeout);
     });
   });
 
@@ -458,6 +468,7 @@ describe("Message Encoding and Decoding", () => {
         crdt: CrdtType.Loro,
         roomId,
         updates: [largeUpdate],
+        batchId,
       };
 
       expect(() => encode(message)).toThrow(/Message size .* exceeds maximum/);

@@ -8,9 +8,9 @@ import {
   encodeEloContainer,
   tryDecode,
   MessageType,
-  UpdateErrorCode,
+  UpdateStatusCode,
   type ProtocolMessage,
-  type UpdateError,
+  type Ack,
 } from "loro-protocol";
 import { EloAdaptor } from "loro-adaptors/loro";
 
@@ -48,7 +48,9 @@ describe("E2E: %ELO join/backfill and live updates", () => {
   });
 
   afterAll(async () => {
-    await server.stop();
+    if (server) {
+      await server.stop();
+    }
   }, 15000);
 
   it("joins with backfill and syncs live", async () => {
@@ -154,7 +156,9 @@ describe("E2E: %ELO server validation and errors", () => {
   });
 
   afterAll(async () => {
-    await server.stop();
+    if (server) {
+      await server.stop();
+    }
   }, 15000);
 
   it("rejects delta with invalid IV length", async () => {
@@ -184,17 +188,20 @@ describe("E2E: %ELO server validation and errors", () => {
     const container = encodeEloContainer([rec]);
 
     // Send DocUpdate
+    const batchId = "0x0102030405060708";
     ws.send(
       encode({
         type: MessageType.DocUpdate,
         crdt: "%ELO",
         roomId: "elo-bad",
         updates: [container],
+        batchId,
       } as any)
     );
 
-    const err = await waitForUpdateError(ws);
-    expect(err.code).toBe(UpdateErrorCode.InvalidUpdate);
+    const ack = await waitForAck(ws);
+    expect(ack.status).toBe(UpdateStatusCode.InvalidUpdate);
+    expect(ack.refId).toBe(batchId);
   }, 15000);
 
   it("rejects delta with too-long peerId and keyId", async () => {
@@ -222,17 +229,20 @@ describe("E2E: %ELO server validation and errors", () => {
       ct: new Uint8Array([0]),
     });
     const container = encodeEloContainer([rec]);
+    const batchId = "0x0100000000000000";
     ws.send(
       encode({
         type: MessageType.DocUpdate,
         crdt: "%ELO",
         roomId: "elo-bad2",
         updates: [container],
+        batchId,
       } as any)
     );
 
-    const err = await waitForUpdateError(ws);
-    expect(err.code).toBe(UpdateErrorCode.InvalidUpdate);
+    const ack = await waitForAck(ws);
+    expect(ack.status).toBe(UpdateStatusCode.InvalidUpdate);
+    expect(ack.refId).toBe(batchId);
   }, 15000);
 
   it("client encode rejects payloads larger than MAX_MESSAGE_SIZE", async () => {
@@ -258,6 +268,7 @@ describe("E2E: %ELO server validation and errors", () => {
         crdt: "%ELO",
         roomId: "elo-big",
         updates: [big],
+        batchId: "0x00ff00ff00ff00ff",
       } as any);
     } catch (e) {
       threw = true;
@@ -360,7 +371,7 @@ async function waitForJoinOk(ws: WebSocket): Promise<void> {
   });
 }
 
-async function waitForUpdateError(ws: WebSocket): Promise<UpdateError> {
+async function waitForAck(ws: WebSocket): Promise<Ack> {
   return await new Promise((resolve, reject) => {
     const t = setTimeout(() => {
       reject(new Error("timeout"));
@@ -368,7 +379,7 @@ async function waitForUpdateError(ws: WebSocket): Promise<UpdateError> {
     ws.on("message", (data: unknown) => {
       try {
         const msg = tryDecodeMsg(data);
-        if (msg?.type === MessageType.UpdateError) {
+        if (msg?.type === MessageType.Ack) {
           clearTimeout(t);
           resolve(msg);
         }

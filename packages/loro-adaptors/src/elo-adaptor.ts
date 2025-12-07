@@ -2,9 +2,6 @@ import { LoroDoc, VersionVector, decodeImportBlobMeta } from "loro-crdt";
 import {
   CrdtType,
   JoinResponseOk,
-  UpdateError,
-  MessageType,
-  UpdateErrorCode,
 } from "loro-protocol";
 import type { CrdtAdaptorContext, CrdtDocAdaptor } from "./types";
 import {
@@ -27,7 +24,11 @@ export interface EloAdaptorConfig {
     err: Error,
     meta: { kind: "delta" | "snapshot"; keyId: string }
   ) => void;
-  onUpdateError?: (error: UpdateError) => void;
+  onUpdateError?: (
+    updates: Uint8Array[],
+    errorCode: number,
+    reason?: string
+  ) => void;
 }
 
 export class EloAdaptor implements CrdtDocAdaptor {
@@ -146,13 +147,8 @@ export class EloAdaptor implements CrdtDocAdaptor {
             await this.sendSnapshot();
           }
         } catch (err) {
-          this.config.onUpdateError?.({
-            type: MessageType.UpdateError,
-            crdt: this.crdtType,
-            roomId: "",
-            code: UpdateErrorCode.Unknown,
-            message: err instanceof Error ? err.message : String(err),
-          });
+          // Surface failure to host.
+          console.error("ELO adaptor failed to package/send update", err);
         }
       })();
     });
@@ -164,6 +160,14 @@ export class EloAdaptor implements CrdtDocAdaptor {
 
   getAlternativeVersion(_currentVersion: Uint8Array): Uint8Array | undefined {
     return undefined;
+  }
+
+  onUpdateError(
+    updates: Uint8Array[],
+    errorCode: number,
+    reason?: string
+  ): void {
+    this.config.onUpdateError?.(updates, errorCode, reason);
   }
 
   async handleJoinOk(res: JoinResponseOk): Promise<void> {
@@ -233,10 +237,6 @@ export class EloAdaptor implements CrdtDocAdaptor {
         this.reachServerVersionPromise.resolve();
       }
     }
-  }
-
-  handleUpdateError(error: UpdateError): void {
-    this.config.onUpdateError?.(error);
   }
 
   destroy(): void {

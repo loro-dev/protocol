@@ -1,9 +1,4 @@
-import {
-  CrdtType,
-  JoinResponseOk,
-  JoinError,
-  UpdateError,
-} from "loro-protocol";
+import { CrdtType, JoinResponseOk } from "loro-protocol";
 
 export interface CrdtDocAdaptor {
   crdtType: CrdtType;
@@ -45,11 +40,16 @@ export interface CrdtDocAdaptor {
     currentVersion: Uint8Array
   ) => Uint8Array | undefined;
   /**
-   * Handle update errors with context-specific logic
-   * @param error The update error details
+   * Called when the server rejects a previously sent update batch.
+   * @param updates The original updates that were sent
+   * @param errorCode The numeric update status code from the Ack
+   * @param reason Optional human-readable reason if available
    */
-  handleUpdateError?: (error: UpdateError) => void;
-  handleJoinErr?: (err: JoinError) => Promise<void>;
+  onUpdateError?: (
+    updates: Uint8Array[],
+    errorCode: number,
+    reason?: string
+  ) => void;
   destroy: () => void;
 }
 

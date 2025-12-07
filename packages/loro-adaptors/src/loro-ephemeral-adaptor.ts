@@ -22,8 +22,6 @@ export class LoroEphemeralAdaptor implements CrdtDocAdaptor {
     return 0 as const;
   }
 
-  handleJoinErr?: undefined;
-
   getStore(): EphemeralStore {
     return this.store;
   }

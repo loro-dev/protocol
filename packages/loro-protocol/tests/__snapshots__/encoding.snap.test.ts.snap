@@ -1,6 +1,10 @@
 // Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
 
-exports[`encoding snapshots > DocUpdate multiple updates 1`] = `"0x25594a5309726f6f6d2d3132333403030301020304040506070108"`;
+exports[`encoding snapshots > Ack fragment timeout 1`] = `"0x2559415709726f6f6d2d3132333408010000000000000007"`;
+
+exports[`encoding snapshots > Ack ok 1`] = `"0x254c4f5209726f6f6d2d3132333408010203040506070800"`;
+
+exports[`encoding snapshots > DocUpdate multiple updates 1`] = `"0x25594a5309726f6f6d2d31323334030303010203040405060701080102030405060708"`;
 
 exports[`encoding snapshots > DocUpdateFragment 1`] = `"0x254c4f5209726f6f6d2d313233340500000000000000000320000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f"`;
 
@@ -20,8 +24,4 @@ exports[`encoding snapshots > JoinResponseOk write + extra 1`] = `"0x254c4f52097
 
 exports[`encoding snapshots > Leave 1`] = `"0x254c4f5209726f6f6d2d3132333407"`;
 
-exports[`encoding snapshots > UpdateError app error with appCode 1`] = `"0x254c4f5209726f6f6d2d31323334067f10437573746f6d20617070206572726f720f637573746f6d5f636f64655f313233"`;
-
-exports[`encoding snapshots > UpdateError fragment timeout with batchId 1`] = `"0x2559415709726f6f6d2d31323334060710467261676d656e742074696d656f75740100000000000000"`;
-
-exports[`encoding snapshots > UpdateError permission denied 1`] = `"0x254c4f5209726f6f6d2d313233340603134e6f207772697465207065726d697373696f6e"`;
+exports[`encoding snapshots > RoomError eviction 1`] = `"0x254c4f5209726f6f6d2d3132333406020765766963746564"`;

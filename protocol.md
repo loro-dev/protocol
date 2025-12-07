@@ -1,6 +1,6 @@
 # Loro Syncing Protocol
 
-Protocol version: 0.
+Protocol version: 1.
 
 It is the application's responsibility to ensure Req and Recv use the same protocol version.
 
@@ -62,6 +62,7 @@ Note: Keepalive frames are special and bypass this envelope entirely. When the e
 - 0x03: DocUpdate.
   - `varUint` N.
   - N `varBytes`.
+  - 8-byte Update Batch ID appended at the end of the message, used to correlate ACKs.
 - 0x04: DocUpdateFragmentHeader.
   - 8-byte ID for this batch of fragments.
   - `varUint` fragment count
@@ -70,11 +71,14 @@ Note: Keepalive frames are special and bypass this envelope entirely. When the e
   - 8-byte ID for this batch of fragments.
   - `varUint` nth fragment.
   - `varBytes` update fragment.
-- 0x06: UpdateError.
-  - 1-byte error code. See Errors.
+- 0x06: RoomError.
+- 1-byte error code. See Errors and status.
   - `varString` message (human-friendly).
-  - Optional: for `fragment_timeout`, append 8-byte batch ID.
+  - Receiving this means the peer has been removed from the room and will not receive further messages until it rejoins.
 - 0x07: Leave. Unsubscribe from the room.
+- 0x08: Ack.
+  - 8-byte reference ID pointing to an Update Batch ID or a Fragment ID.
+  - 1-byte status. `0x00` means accepted; non-zero values follow Update Status Codes.
 
 ## Syncing Process
 
@@ -86,9 +90,11 @@ Req sends a `JoinRequest` to Recv.
 
 When Recv receives updates in the same room from other peers, it broadcasts them to all the other peers through `DocUpdate` or `DocUpdateFragment` messages.
 
-When Req makes local edits on the document, it sends `DocUpdate` or `DocUpdateFragment` messages to Recv.
+When Req makes local edits on the document, it sends `DocUpdate` (with its Update Batch ID) or `DocUpdateFragment` messages to Recv. Recv MUST reply with an `Ack` referencing that Update Batch ID (or the fragment batch ID when fragments are used). A status of `0x00` confirms acceptance; non-zero statuses follow Update Status Codes. For example, if Req lacks write permission, Recv sends `Ack(status=0x03 permission_denied)` for that batch.
 
-- If Req doesn't have permission to edit the document, an `UpdateError(code=0x03 permission_denied)` is sent to Req.
+**WebSocket (client–server) directionality:** when Recv (the server) pushes updates to Req (the client), Req SHOULD NOT send `Ack(status=0x00)` back. The server already assumes delivery over the WebSocket. The client MAY send a non‑zero `Ack` (referencing the server’s batch ID) to report that it failed to apply the update (for example `invalid_update` or `fragment_timeout`).
+
+If Recv forces the peer out of the room (permission change, quota enforcement, malicious behavior, etc.), it sends `RoomError`. After receiving `RoomError`, the peer MUST treat the room as closed and will not receive further messages until it rejoins.
 
 Req sends `Leave` if it is no longer interested in updates for the target document.
 
@@ -98,16 +104,20 @@ It is usually not efficient to send a large document without splitting it into f
 
 This protocol limits message size to 256 KB. Large updates must be split into fragments of up to 256 KB each. The default reassembly timeout is 10 seconds.
 
+`Ack` messages for fragmented updates reference the 8-byte batch ID defined in `DocUpdateFragmentHeader`.
+
 If Recv times out waiting for remaining fragments of a batch, it MUST:
 
 - Discard all partial fragments for that batch ID.
-- Send `UpdateError(code=0x07 fragment_timeout)` with the 8-byte batch ID so Req can resend.
+- Send `Ack(status=0x07 fragment_timeout)` with the 8-byte batch ID so Req can resend.
 
-Upon receiving `fragment_timeout`, Req SHOULD resend the whole batch (header + all fragments) with the same or a new batch ID.
+Upon receiving `Ack(status=0x07 fragment_timeout)`, Req SHOULD resend the whole batch (header + all fragments) with the same or a new batch ID.
 
-## Errors
+If Req (client) times out while reassembling fragments sent by Recv (server), it MAY send `Ack(status=0x07 fragment_timeout)` with that batch ID to signal the failure. Servers MAY choose to resend the batch or fall back to a snapshot/delta strategy.
 
-Two error message types with small numeric codes for clarity and easy parsing.
+## Errors and status
+
+Two message types carry error semantics; update-level results travel in `Ack` status bytes.
 
 ### JoinError (0x02)
 
@@ -121,19 +131,28 @@ Codes:
 - 0x02 auth_failed: authentication/authorization failed or the join payload was rejected.
 - 0x7F app_error: Extra `varString app_code` (free-form, e.g., `quota_exceeded`).
 
-### UpdateError (0x06)
+### RoomError (0x06)
 
 - Fields: 1-byte `code`, `varString message`.
+- Semantics: the peer has been forcibly removed from the room (permission change, quota enforcement, malicious behavior, etc.). No further messages for the room will be delivered until it rejoins.
+- Client behavior: do **not** auto-rejoin after a `RoomError` unless the code explicitly asks for it (0x01). A code of 0x01 is a hint that another peer needs you to rejoin to recover consistency (e.g., missing updates while the sender lacks your version vector). When receiving 0x01, clients SHOULD issue a single immediate `JoinRequest`; for any other code, clients MUST stay disconnected until the application chooses to rejoin.
 
 Codes:
 
-- 0x00 unknown: unspecified error.
+- 0x01 rejoin_suggested: peer requests a fresh join so both sides can reconcile state. Clients MAY auto-rejoin once.
+- 0x02 evicted: explicit eviction; clients MUST NOT auto-rejoin.
+- 0x7F unknown/app_error: unspecified room-level failure; treat as fatal unless the application decides otherwise.
+
+### Update Status Codes (Ack status byte)
+
+- 0x00 ok: update accepted.
+- 0x01 unknown: unspecified failure.
 - 0x03 permission_denied: requester has no write permission.
 - 0x04 invalid_update: update payload is malformed or rejected.
 - 0x05 payload_too_large: a single message or reassembled update exceeded limits.
 - 0x06 rate_limited: sender is rate limited.
-- 0x07 fragment_timeout: timed out waiting for remaining fragments. Extra: 8-byte `batch_id`.
-- 0x7F app_error: Extra `varString app_code` (free-form, e.g., `quota_exceeded`).
+- 0x07 fragment_timeout: timed out waiting for remaining fragments (use the referenced batch ID).
+- 0x7F app_error: application-defined error code; details are application-specific because `Ack` carries only the status byte.
 
 ### Local (non-message) issues
 
@@ -141,7 +160,7 @@ Codes:
 
 ### Library hook (optional)
 
-Implementations may expose `onError({ roomId, kind, code, message, app_code? })` where `kind` is `join` or `update` based on the message type.
+Implementations may expose `onError({ roomId, kind, code, message, app_code? })` for `join` or `room` messages and `onUpdateStatus({ roomId, refId, status })` to surface non-zero `Ack` statuses.
 
 ## Keepalive: Ping/Pong (Out‑of‑Band)
 
@@ -154,4 +173,19 @@ Some environments (e.g., browsers) do not expose transport‑level WebSocket pin
 - Rate limiting: Implementations MAY rate‑limit excessive keepalive traffic.
 - Timeouts: Applications MAY use `ping`/`pong` round‑trip time to detect dead connections and reconnect.
 
-Implementation note: On platforms that support automatic responses (e.g., Cloudflare Durable Objects), servers MAY configure an auto‑response mapping `ping -> pong` to avoid waking application logic for keepalive traffic.
+Implementation note: On platforms that support automatic responses (e.g., Cloudflare Durable Objects), servers MAY configure an auto-response mapping `ping -> pong` to avoid waking application logic for keepalive traffic.
+
+## Version Differences
+
+- v1 appends an 8-byte Update Batch ID to every `DocUpdate` so peers can correlate acknowledgments.
+- v1 introduces `Ack` (0x08) to positively confirm or reject updates; v0 relied on `UpdateError` messages and had no explicit success signal.
+- v1 repurposes 0x06 from `UpdateError` to `RoomError`, which evicts the peer from the room until it rejoins.
+- v1 shifts update status codes: `ok` is now `0x00`, `unknown` moves to `0x01`, and the remaining codes keep their numeric values from v0.
+- v1 clarifies that a `RoomError` means the peer will stop receiving room traffic unless it performs a new join handshake.
+
+## Why these changes (v1)
+
+- Reliable delivery semantics: explicit `Ack` for each client‑originated update batch (or fragment batch) lets applications know whether a change was accepted instead of inferring success from silence; clients only emit `Ack` when a server‑originated update fails.
+- Clear eviction signal: `RoomError` distinguishes "your update failed" from "you are no longer in the room", enabling clients to stop syncing and prompt rejoin or escalation.
+- Better error mapping: moving `ok` to `0x00` and `unknown` to `0x01` aligns status bytes with common success/failure conventions and leaves room for app-specific errors.
+- Debuggability: 64-bit batch IDs make ACK correlation collision-resistant even on long-lived, multiplexed connections while adding negligible overhead versus the 256 KiB frame limit.

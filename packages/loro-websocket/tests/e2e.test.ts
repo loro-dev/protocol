@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { WebSocket, WebSocketServer } from "ws";
+import type { RawData } from "ws";
 import getPort from "get-port";
 import { SimpleServer } from "../src/server/simple-server";
 import { LoroWebsocketClient, ClientStatus } from "../src/client";
@@ -7,6 +8,16 @@ import type { LoroWebsocketClientRoom } from "../src/client";
 import { LoroAdaptor } from "loro-adaptors/loro";
 import { FlockAdaptor } from "loro-adaptors/flock";
 import { Flock } from "@loro-dev/flock";
+import {
+  encode,
+  decode,
+  MessageType,
+  RoomErrorCode,
+  type JoinResponseOk,
+  type RoomError,
+} from "loro-protocol";
+
+
 
 // Make WebSocket available globally for the client
 Object.defineProperty(globalThis, "WebSocket", {
@@ -30,7 +41,6 @@ describe("E2E: Client-Server Sync", () => {
   }, 15000);
 
   it("should sync two clients through server", async () => {
-    // Create two clients
     const client1 = new LoroWebsocketClient({ url: `ws://localhost:${port}` });
     const client2 = new LoroWebsocketClient({ url: `ws://localhost:${port}` });
 
@@ -420,9 +430,9 @@ describe("E2E: Client-Server Sync", () => {
       await waitUntil(
         () =>
           statuses1.filter(s => s === ClientStatus.Connected).length >
-            initialConnected1 &&
+          initialConnected1 &&
           statuses2.filter(s => s === ClientStatus.Connected).length >
-            initialConnected2,
+          initialConnected2,
         5000,
         25
       );
@@ -623,7 +633,7 @@ describe("E2E: Client-Server Sync", () => {
             ? data
             : Buffer.isBuffer(data)
               ? data.toString()
-              : new TextDecoder().decode(new Uint8Array(data as ArrayBuffer));
+              : new TextDecoder().decode(new Uint8Array(data));
         if (text === "ping") {
           // Only respond for non-fatal connections
           if (connId >= 2) {
@@ -635,7 +645,7 @@ describe("E2E: Client-Server Sync", () => {
         setTimeout(() => {
           try {
             ws.close(1008, "policy");
-          } catch {}
+          } catch { }
         }, 30);
       }
     });
@@ -830,7 +840,7 @@ describe("E2E: Client-Server Sync", () => {
             ? data
             : Buffer.isBuffer(data)
               ? data.toString()
-              : new TextDecoder().decode(new Uint8Array(data as ArrayBuffer));
+              : new TextDecoder().decode(new Uint8Array(data));
         if (text === "ping") {
           if (id >= 2) ws.send("pong");
           // first connection intentionally ignores to trigger timeout
@@ -868,6 +878,116 @@ describe("E2E: Client-Server Sync", () => {
     client.destroy();
     wss.close();
   }, 12000);
+});
+
+describe("E2E: RoomError rejoin policy", () => {
+  it("does not auto rejoin after eviction (0x02)", async () => {
+    const port = await getPort();
+    const wss = new WebSocketServer({ port });
+    let joinCount = 0;
+
+    wss.on("connection", ws => {
+      ws.on("message", data => {
+        let msg;
+        try {
+          msg = decode(toUint8Array(data));
+        } catch {
+          return;
+        }
+        if (msg.type === MessageType.JoinRequest) {
+          joinCount += 1;
+          const res: JoinResponseOk = {
+            type: MessageType.JoinResponseOk,
+            crdt: msg.crdt,
+            roomId: msg.roomId,
+            permission: "write",
+            version: new Uint8Array(),
+          };
+          ws.send(encode(res));
+          setTimeout(() => {
+            const err: RoomError = {
+              type: MessageType.RoomError,
+              crdt: msg.crdt,
+              roomId: msg.roomId,
+              code: RoomErrorCode.Evicted,
+              message: "evicted",
+            };
+            ws.send(encode(err));
+          }, 50);
+        }
+      });
+    });
+
+    const client = new LoroWebsocketClient({ url: `ws://localhost:${port}` });
+    await client.waitConnected();
+    const adaptor = new LoroAdaptor();
+    await client.join({ roomId: "room-evict", crdtAdaptor: adaptor });
+
+    // Wait to allow potential auto-rejoin attempts
+    await new Promise(r => setTimeout(r, 400));
+
+    expect(joinCount).toBe(1);
+
+    client.destroy();
+    wss.close();
+  }, 5000);
+
+  it("auto rejoins once when server suggests rejoin (0x01)", async () => {
+    const port = await getPort();
+    const wss = new WebSocketServer({ port });
+    let joinCount = 0;
+
+    wss.on("connection", ws => {
+      ws.on("message", data => {
+        let msg;
+        try {
+          msg = decode(toUint8Array(data));
+        } catch {
+          return;
+        }
+        if (msg.type === MessageType.JoinRequest) {
+          joinCount += 1;
+          const res: JoinResponseOk = {
+            type: MessageType.JoinResponseOk,
+            crdt: msg.crdt,
+            roomId: msg.roomId,
+            permission: "write",
+            version: new Uint8Array(),
+          };
+          ws.send(encode(res));
+          // Only prompt rejoin on first join
+          if (joinCount === 1) {
+            setTimeout(() => {
+              const err: RoomError = {
+                type: MessageType.RoomError,
+                crdt: msg.crdt,
+                roomId: msg.roomId,
+                code: RoomErrorCode.RejoinSuggested,
+                message: "please rejoin",
+              };
+              ws.send(encode(err));
+            }, 50);
+          }
+        }
+      });
+    });
+
+    const client = new LoroWebsocketClient({
+      url: `ws://localhost:${port}`,
+      reconnect: { initialDelayMs: 50, maxDelayMs: 150, jitter: 0 },
+    });
+    await client.waitConnected();
+    const adaptor = new LoroAdaptor();
+    await client.join({ roomId: "room-rejoin", crdtAdaptor: adaptor });
+
+    await waitUntil(() => joinCount >= 2, 5000, 20).catch(() => { });
+    // Ensure no extra rejoins
+    await new Promise(r => setTimeout(r, 200));
+    expect(joinCount).toBe(2);
+
+    client.destroy();
+    wss.close();
+  }, 8000);
 });
 
 function installMockWindow(initialOnline = true) {
@@ -994,3 +1114,19 @@ async function waitUntil(
   }
   throw new Error("Condition not met within timeout");
 }
+
+function toUint8Array(data: RawData | string): Uint8Array {
+  if (typeof data === "string") return new TextEncoder().encode(data);
+  if (Array.isArray(data)) {
+    // RawData can be Buffer[] when `ws` aggregates chunks
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-argument
+    return toUint8Array(Buffer.concat(data as Buffer[]));
+  }
+  if (data instanceof ArrayBuffer) return new Uint8Array(data);
+  if (ArrayBuffer.isView(data)) return new Uint8Array(data.buffer, data.byteOffset, data.byteLength);
+  // Buffer from ws in Node
+  // @ts-ignore
+  if (typeof Buffer !== "undefined" && Buffer.isBuffer(data)) return new Uint8Array(data);
+  return new Uint8Array();
+}
+// (duplicate WebSocketServer import removed)

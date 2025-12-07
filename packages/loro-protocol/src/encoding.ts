@@ -2,7 +2,7 @@ import { BytesReader, BytesWriter } from "./bytes";
 import {
   CrdtType,
   JoinErrorCode,
-  UpdateErrorCode,
+  UpdateStatusCode,
   MessageType,
   ProtocolMessage,
   JoinRequest,
@@ -11,11 +11,13 @@ import {
   DocUpdate,
   DocUpdateFragmentHeader,
   DocUpdateFragment,
-  UpdateError,
+  RoomError,
   Leave,
   MAX_MESSAGE_SIZE,
   hexToBytes,
   bytesToHex,
+  Ack,
+  RoomErrorCode,
   HexString,
 } from "./protocol";
 
@@ -52,8 +54,9 @@ function isMessageType(x: number): x is MessageType {
     x === MessageType.DocUpdate ||
     x === MessageType.DocUpdateFragmentHeader ||
     x === MessageType.DocUpdateFragment ||
-    x === MessageType.UpdateError ||
-    x === MessageType.Leave
+    x === MessageType.RoomError ||
+    x === MessageType.Leave ||
+    x === MessageType.Ack
   );
 }
 
@@ -66,16 +69,42 @@ function isJoinErrorCode(x: number): x is JoinErrorCode {
   );
 }
 
-function isUpdateErrorCode(x: number): x is UpdateErrorCode {
+function isUpdateStatusCode(x: number): x is UpdateStatusCode {
   return (
-    x === UpdateErrorCode.Unknown ||
-    x === UpdateErrorCode.PermissionDenied ||
-    x === UpdateErrorCode.InvalidUpdate ||
-    x === UpdateErrorCode.PayloadTooLarge ||
-    x === UpdateErrorCode.RateLimited ||
-    x === UpdateErrorCode.FragmentTimeout ||
-    x === UpdateErrorCode.AppError
+    x === UpdateStatusCode.Ok ||
+    x === UpdateStatusCode.Unknown ||
+    x === UpdateStatusCode.PermissionDenied ||
+    x === UpdateStatusCode.InvalidUpdate ||
+    x === UpdateStatusCode.PayloadTooLarge ||
+    x === UpdateStatusCode.RateLimited ||
+    x === UpdateStatusCode.FragmentTimeout ||
+    x === UpdateStatusCode.AppError
   );
+}
+
+function isRoomErrorCode(x: number): x is RoomErrorCode {
+  return (
+    x === RoomErrorCode.RejoinSuggested ||
+    x === RoomErrorCode.Evicted ||
+    x === RoomErrorCode.Unknown
+  );
+}
+
+function readBatchId(reader: BytesReader, context: string): HexString {
+  if (reader.remaining < 8) {
+    throw new Error(`Invalid ${context}: missing batch ID`);
+  }
+  const batchIdBytes = reader.readBytes(8);
+  if (batchIdBytes.byteLength !== 8) {
+    throw new Error(`Invalid ${context}: batch ID must be exactly 8 bytes`);
+  }
+  return bytesToHex(batchIdBytes);
+}
+
+function ensureFullyConsumed(reader: BytesReader, context: string) {
+  if (reader.remaining !== 0) {
+    throw new Error(`Invalid ${context}: unexpected trailing bytes`);
+  }
 }
 
 export function encode(message: ProtocolMessage): Uint8Array {
@@ -132,6 +161,8 @@ export function encode(message: ProtocolMessage): Uint8Array {
       for (const update of message.updates) {
         writer.pushVarBytes(update);
       }
+      // Append 8-byte Update Batch ID
+      writer.pushBytes(hexToBytes(message.batchId));
       break;
     }
     case MessageType.DocUpdateFragmentHeader: {
@@ -150,19 +181,14 @@ export function encode(message: ProtocolMessage): Uint8Array {
       writer.pushVarBytes(message.fragment);
       break;
     }
-    case MessageType.UpdateError: {
+    case MessageType.RoomError: {
       writer.pushByte(message.code);
       writer.pushVarString(message.message);
-      if (
-        message.code === UpdateErrorCode.FragmentTimeout &&
-        message.batchId !== undefined
-      ) {
-        const batchIdBytes = hexToBytes(message.batchId);
-        writer.pushBytes(batchIdBytes);
-      }
-      if (message.code === UpdateErrorCode.AppError && message.appCode) {
-        writer.pushVarString(message.appCode);
-      }
+      break;
+    }
+    case MessageType.Ack: {
+      writer.pushBytes(hexToBytes(message.refId));
+      writer.pushByte(message.status);
       break;
     }
     case MessageType.Leave: {
@@ -274,21 +300,21 @@ export function decode(data: Uint8Array): ProtocolMessage {
       for (let i = 0; i < count; i++) {
         updates.push(reader.readVarBytes());
       }
+      const batchId = readBatchId(reader, "DocUpdate");
+      ensureFullyConsumed(reader, "DocUpdate");
       return {
         type,
         crdt,
         roomId,
         updates,
+        batchId,
       } as DocUpdate;
     }
     case MessageType.DocUpdateFragmentHeader: {
-      if (reader.remaining < 8) {
-        throw new Error("Invalid DocUpdateFragmentHeader: missing batch ID");
-      }
-      const batchIdBytes = reader.readBytes(8);
-      const batchId = bytesToHex(batchIdBytes);
+      const batchId = readBatchId(reader, "DocUpdateFragmentHeader");
       const fragmentCount = reader.readUleb128();
       const totalSizeBytes = reader.readUleb128();
+      ensureFullyConsumed(reader, "DocUpdateFragmentHeader");
       return {
         type,
         crdt,
@@ -299,13 +325,10 @@ export function decode(data: Uint8Array): ProtocolMessage {
       } as DocUpdateFragmentHeader;
     }
     case MessageType.DocUpdateFragment: {
-      if (reader.remaining < 8) {
-        throw new Error("Invalid DocUpdateFragment: missing batch ID");
-      }
-      const batchIdBytes = reader.readBytes(8);
-      const batchId = bytesToHex(batchIdBytes);
+      const batchId = readBatchId(reader, "DocUpdateFragment");
       const index = reader.readUleb128();
       const fragment = reader.readVarBytes();
+      ensureFullyConsumed(reader, "DocUpdateFragment");
       return {
         type,
         crdt,
@@ -315,32 +338,37 @@ export function decode(data: Uint8Array): ProtocolMessage {
         fragment,
       } as DocUpdateFragment;
     }
-    case MessageType.UpdateError: {
+    case MessageType.RoomError: {
       const codeByte2 = reader.readByte();
-      const code = isUpdateErrorCode(codeByte2)
+      const code = isRoomErrorCode(codeByte2)
         ? codeByte2
-        : UpdateErrorCode.Unknown;
+        : RoomErrorCode.Unknown;
       const message = reader.readVarString();
-      let batchId: HexString | undefined;
-      let appCode: string | undefined;
-
-      if (code === UpdateErrorCode.FragmentTimeout && reader.remaining >= 8) {
-        const batchIdBytes = reader.readBytes(8);
-        batchId = bytesToHex(batchIdBytes);
-      }
-      if (code === UpdateErrorCode.AppError && reader.remaining > 0) {
-        appCode = reader.readVarString();
-      }
-
       return {
         type,
         crdt,
         roomId,
         code,
         message,
-        batchId,
-        appCode,
-      } as UpdateError;
+      } as RoomError;
+    }
+    case MessageType.Ack: {
+      if (reader.remaining < 9) {
+        throw new Error("Invalid Ack: missing fields");
+      }
+      const refId = readBatchId(reader, "Ack");
+      const statusByte = reader.readByte();
+      const status = isUpdateStatusCode(statusByte)
+        ? statusByte
+        : UpdateStatusCode.Unknown;
+      ensureFullyConsumed(reader, "Ack");
+      return {
+        type,
+        crdt,
+        roomId,
+        refId,
+        status,
+      } as Ack;
     }
     case MessageType.Leave: {
       return {

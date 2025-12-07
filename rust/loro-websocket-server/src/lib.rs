@@ -43,7 +43,9 @@ use tokio_tungstenite::tungstenite::{self, Message};
 use loro::awareness::EphemeralStore;
 use loro::{ExportMode, LoroDoc};
 pub use loro_protocol as protocol;
-use protocol::{try_decode, BytesReader, CrdtType, JoinErrorCode, Permission, ProtocolMessage};
+use protocol::{
+    try_decode, CrdtType, JoinErrorCode, Permission, ProtocolMessage, UpdateStatusCode,
+};
 use tracing::{debug, error, info, warn};
 
 // Limits to protect server memory from abusive fragment headers
@@ -637,13 +639,20 @@ where
         }
     }
 
-    fn apply_updates(&mut self, room: &RoomKey, updates: &[Vec<u8>]) {
-        if let Some(state) = self.docs.get_mut(room) {
-            if let Err(e) = state.doc.apply_updates(updates) {
-                warn!(room=?room.room, %e, "apply_updates failed");
-            } else if state.doc.should_persist() {
-                state.dirty = true;
+    fn apply_updates(&mut self, room: &RoomKey, updates: &[Vec<u8>]) -> Result<(), String> {
+        match self.docs.get_mut(room) {
+            Some(state) => {
+                if let Err(e) = state.doc.apply_updates(updates) {
+                    warn!(room=?room.room, %e, "apply_updates failed");
+                    Err(e)
+                } else {
+                    if state.doc.should_persist() {
+                        state.dirty = true;
+                    }
+                    Ok(())
+                }
             }
+            None => Err("room not found".into()),
         }
     }
 
@@ -728,6 +737,29 @@ where
 }
 
 static NEXT_ID: AtomicU64 = AtomicU64::new(1);
+static NEXT_BATCH_ID: AtomicU64 = AtomicU64::new(1);
+
+fn next_batch_id() -> protocol::BatchId {
+    protocol::BatchId(NEXT_BATCH_ID.fetch_add(1, Ordering::Relaxed).to_be_bytes())
+}
+
+fn send_ack(
+    tx: &Sender,
+    crdt: CrdtType,
+    room: &str,
+    ref_id: protocol::BatchId,
+    status: UpdateStatusCode,
+) {
+    let ack = ProtocolMessage::Ack {
+        crdt,
+        room_id: room.to_string(),
+        ref_id,
+        status,
+    };
+    if let Ok(bytes) = loro_protocol::encode(&ack) {
+        let _ = tx.send(Message::Binary(bytes.into()));
+    }
+}
 
 struct HubRegistry<DocCtx> {
     config: ServerConfig<DocCtx>,
@@ -1029,6 +1061,7 @@ where
                                     crdt,
                                     room_id: room.room.clone(),
                                     updates: vec![snap],
+                                    batch_id: next_batch_id(),
                                 };
                                 if let Ok(bytes) = loro_protocol::encode(&du) {
                                     let _ = tx.send(Message::Binary(bytes.into()));
@@ -1055,6 +1088,7 @@ where
                                             crdt,
                                             room_id: room.room.clone(),
                                             updates: vec![u],
+                                            batch_id: next_batch_id(),
                                         };
                                         if let Ok(bytes) = loro_protocol::encode(&du) {
                                             let _ = tx.send(Message::Binary(bytes.into()));
@@ -1078,17 +1112,13 @@ where
                                 room: room_id.clone(),
                             };
                             if !joined_rooms.contains(&room) {
-                                let err = ProtocolMessage::UpdateError {
+                                send_ack(
+                                    &tx,
                                     crdt,
-                                    room_id: room.room.clone(),
-                                    code: protocol::UpdateErrorCode::PermissionDenied,
-                                    message: "Must join room before sending updates".into(),
-                                    batch_id: Some(batch_id),
-                                    app_code: None,
-                                };
-                                if let Ok(bytes) = loro_protocol::encode(&err) {
-                                    let _ = tx.send(Message::Binary(bytes.into()));
-                                }
+                                    &room.room,
+                                    batch_id,
+                                    UpdateStatusCode::PermissionDenied,
+                                );
                                 continue;
                             }
                             // Permission check
@@ -1099,17 +1129,13 @@ where
                                 .get(&(conn_id, room.clone()))
                                 .copied();
                             if !matches!(perm, Some(Permission::Write)) {
-                                let err = ProtocolMessage::UpdateError {
+                                send_ack(
+                                    &tx,
                                     crdt,
-                                    room_id: room.room.clone(),
-                                    code: protocol::UpdateErrorCode::PermissionDenied,
-                                    message: "Write permission required to update document".into(),
-                                    batch_id: Some(batch_id),
-                                    app_code: None,
-                                };
-                                if let Ok(bytes) = loro_protocol::encode(&err) {
-                                    let _ = tx.send(Message::Binary(bytes.into()));
-                                }
+                                    &room.room,
+                                    batch_id,
+                                    UpdateStatusCode::PermissionDenied,
+                                );
                                 continue;
                             }
                             // Bounds checks
@@ -1117,17 +1143,13 @@ where
                                 || fragment_count > MAX_FRAGMENTS
                                 || total_size_bytes > MAX_BATCH_BYTES
                             {
-                                let err = ProtocolMessage::UpdateError {
+                                send_ack(
+                                    &tx,
                                     crdt,
-                                    room_id: room.room.clone(),
-                                    code: protocol::UpdateErrorCode::PayloadTooLarge,
-                                    message: "Fragmented batch exceeds server limits".into(),
-                                    batch_id: Some(batch_id),
-                                    app_code: None,
-                                };
-                                if let Ok(bytes) = loro_protocol::encode(&err) {
-                                    let _ = tx.send(Message::Binary(bytes.into()));
-                                }
+                                    &room.room,
+                                    batch_id,
+                                    UpdateStatusCode::PayloadTooLarge,
+                                );
                                 continue;
                             }
                             // Initialize batch (guard against hijack by another sender)
@@ -1135,17 +1157,13 @@ where
                             let key = (room.clone(), batch_id);
                             if let Some(existing) = h.fragments.get(&key) {
                                 if existing.from_conn != conn_id {
-                                    let err = ProtocolMessage::UpdateError {
+                                    send_ack(
+                                        &tx,
                                         crdt,
-                                        room_id: room.room.clone(),
-                                        code: protocol::UpdateErrorCode::InvalidUpdate,
-                                        message: "Batch ID already in use by another sender".into(),
-                                        batch_id: Some(batch_id),
-                                        app_code: None,
-                                    };
-                                    if let Ok(bytes) = loro_protocol::encode(&err) {
-                                        let _ = tx.send(Message::Binary(bytes.into()));
-                                    }
+                                        &room.room,
+                                        batch_id,
+                                        UpdateStatusCode::InvalidUpdate,
+                                    );
                                     continue;
                                 }
                                 // else: duplicate header from same sender -> accept and broadcast as-is
@@ -1173,17 +1191,13 @@ where
                                 room: room_id.clone(),
                             };
                             if !joined_rooms.contains(&room) {
-                                let err = ProtocolMessage::UpdateError {
+                                send_ack(
+                                    &tx,
                                     crdt,
-                                    room_id: room.room.clone(),
-                                    code: protocol::UpdateErrorCode::PermissionDenied,
-                                    message: "Must join room before sending updates".into(),
-                                    batch_id: Some(batch_id),
-                                    app_code: None,
-                                };
-                                if let Ok(bytes) = loro_protocol::encode(&err) {
-                                    let _ = tx.send(Message::Binary(bytes.into()));
-                                }
+                                    &room.room,
+                                    batch_id,
+                                    UpdateStatusCode::PermissionDenied,
+                                );
                                 continue;
                             }
                             // Validate batch existence and sender binding; also index bounds
@@ -1191,17 +1205,13 @@ where
                             let key = (room.clone(), batch_id);
                             if let Some(b) = h.fragments.get(&key) {
                                 if b.from_conn != conn_id {
-                                    let err = ProtocolMessage::UpdateError {
+                                    send_ack(
+                                        &tx,
                                         crdt,
-                                        room_id: room.room.clone(),
-                                        code: protocol::UpdateErrorCode::InvalidUpdate,
-                                        message: "Fragment from wrong sender for batch".into(),
-                                        batch_id: Some(batch_id),
-                                        app_code: None,
-                                    };
-                                    if let Ok(bytes) = loro_protocol::encode(&err) {
-                                        let _ = tx.send(Message::Binary(bytes.into()));
-                                    }
+                                        &room.room,
+                                        batch_id,
+                                        UpdateStatusCode::InvalidUpdate,
+                                    );
                                     // do not broadcast
                                     continue;
                                 }
@@ -1210,31 +1220,23 @@ where
                                     .map(|i| i < b.chunks.len())
                                     .unwrap_or(false)
                                 {
-                                    let err = ProtocolMessage::UpdateError {
+                                    send_ack(
+                                        &tx,
                                         crdt,
-                                        room_id: room.room.clone(),
-                                        code: protocol::UpdateErrorCode::InvalidUpdate,
-                                        message: "Fragment index out of range".into(),
-                                        batch_id: Some(batch_id),
-                                        app_code: None,
-                                    };
-                                    if let Ok(bytes) = loro_protocol::encode(&err) {
-                                        let _ = tx.send(Message::Binary(bytes.into()));
-                                    }
+                                        &room.room,
+                                        batch_id,
+                                        UpdateStatusCode::InvalidUpdate,
+                                    );
                                     continue;
                                 }
                             } else {
-                                let err = ProtocolMessage::UpdateError {
+                                send_ack(
+                                    &tx,
                                     crdt,
-                                    room_id: room.room.clone(),
-                                    code: protocol::UpdateErrorCode::InvalidUpdate,
-                                    message: "Unknown fragment batch".into(),
-                                    batch_id: Some(batch_id),
-                                    app_code: None,
-                                };
-                                if let Ok(bytes) = loro_protocol::encode(&err) {
-                                    let _ = tx.send(Message::Binary(bytes.into()));
-                                }
+                                    &room.room,
+                                    batch_id,
+                                    UpdateStatusCode::FragmentTimeout,
+                                );
                                 continue;
                             }
                             // Broadcast this fragment as-is to others (only after validation)
@@ -1244,22 +1246,29 @@ where
                                 h.add_fragment_and_maybe_finish(&room, batch_id, index, fragment)
                             {
                                 // On completion: parse and apply to stored doc state if applicable
-                                match crdt {
+                                let apply_result = match crdt {
                                     CrdtType::Loro
                                     | CrdtType::LoroEphemeralStore
                                     | CrdtType::LoroEphemeralStorePersisted => {
-                                        if let Ok(updates) = parse_docupdate_payload(&buf) {
-                                            let start = std::time::Instant::now();
-                                            h.apply_updates(&room, &updates);
-                                            let elapsed_ms = start.elapsed().as_millis();
-                                            debug!(room=?room.room, updates=%updates.len(), ms=%elapsed_ms, "applied reassembled updates");
+                                        let start = std::time::Instant::now();
+                                        let res = h.apply_updates(&room, &[buf.clone()]);
+                                        let elapsed_ms = start.elapsed().as_millis();
+                                        if res.is_ok() {
+                                            debug!(room=?room.room, updates=1, ms=%elapsed_ms, "applied reassembled updates");
                                         }
+                                        res
                                     }
                                     CrdtType::Elo => {
                                         // Apply as indexing-only
-                                        h.apply_updates(&room, &[buf]);
+                                        h.apply_updates(&room, &[buf.clone()])
                                     }
-                                    _ => {}
+                                    _ => Ok(()),
+                                };
+
+                                if apply_result.is_ok() {
+                                    send_ack(&tx, crdt, &room.room, batch_id, UpdateStatusCode::Ok);
+                                } else {
+                                    send_ack(&tx, crdt, &room.room, batch_id, UpdateStatusCode::InvalidUpdate);
                                 }
                             }
                         }
@@ -1267,24 +1276,32 @@ where
                             crdt,
                             room_id,
                             updates,
+                            batch_id,
                         } => {
                             let room = RoomKey {
                                 crdt,
                                 room: room_id.clone(),
                             };
-                            if !joined_rooms.contains(&room) {
-                                // Not joined: reject with PermissionDenied
-                                let err = ProtocolMessage::UpdateError {
+                            let oversized =
+                                updates.iter().any(|u| u.len() > protocol::MAX_MESSAGE_SIZE);
+                            if oversized {
+                                send_ack(
+                                    &tx,
                                     crdt,
-                                    room_id: room.room.clone(),
-                                    code: protocol::UpdateErrorCode::PermissionDenied,
-                                    message: "Must join room before sending updates".into(),
-                                    batch_id: None,
-                                    app_code: None,
-                                };
-                                if let Ok(bytes) = loro_protocol::encode(&err) {
-                                    let _ = tx.send(Message::Binary(bytes.into()));
-                                }
+                                    &room.room,
+                                    batch_id,
+                                    UpdateStatusCode::PayloadTooLarge,
+                                );
+                                continue;
+                            }
+                            if !joined_rooms.contains(&room) {
+                                send_ack(
+                                    &tx,
+                                    crdt,
+                                    &room.room,
+                                    batch_id,
+                                    UpdateStatusCode::PermissionDenied,
+                                );
                                 warn!(room=?room.room, "update rejected: not joined");
                             } else {
                                 // Check permission
@@ -1295,40 +1312,52 @@ where
                                     .get(&(conn_id, room.clone()))
                                     .copied();
                                 if !matches!(perm, Some(Permission::Write)) {
-                                    let err = ProtocolMessage::UpdateError {
+                                    send_ack(
+                                        &tx,
                                         crdt,
-                                        room_id: room.room.clone(),
-                                        code: protocol::UpdateErrorCode::PermissionDenied,
-                                        message: "Write permission required to update document"
-                                            .into(),
-                                        batch_id: None,
-                                        app_code: None,
-                                    };
-                                    if let Ok(bytes) = loro_protocol::encode(&err) {
-                                        let _ = tx.send(Message::Binary(bytes.into()));
-                                    }
+                                        &room.room,
+                                        batch_id,
+                                        UpdateStatusCode::PermissionDenied,
+                                    );
                                     continue;
                                 }
                                 let mut h = hub.lock().await;
-                                match crdt {
+                                let apply_result = match crdt {
                                     CrdtType::Loro
                                     | CrdtType::LoroEphemeralStore
                                     | CrdtType::LoroEphemeralStorePersisted => {
                                         let start = std::time::Instant::now();
-                                        h.apply_updates(&room, &updates);
+                                        let res = h.apply_updates(&room, &updates);
                                         let elapsed_ms = start.elapsed().as_millis();
-                                        h.broadcast(&room, conn_id, Message::Binary(data));
-                                        debug!(room=?room.room, updates=%updates.len(), ms=%elapsed_ms, "applied and broadcast updates");
+                                        if res.is_ok() {
+                                            debug!(room=?room.room, updates=%updates.len(), ms=%elapsed_ms, "applied and broadcast updates");
+                                        }
+                                        res
                                     }
                                     CrdtType::Elo => {
                                         // Index headers only; payload remains opaque to server.
-                                        h.apply_updates(&room, &updates);
-                                        h.broadcast(&room, conn_id, Message::Binary(data));
-                                        debug!(room=?room.room, updates=%updates.len(), "indexed and broadcast ELO updates");
+                                        h.apply_updates(&room, &updates)
                                     }
-                                    _ => {
-                                        h.broadcast(&room, conn_id, Message::Binary(data));
-                                    }
+                                    _ => Ok(()),
+                                };
+
+                                if apply_result.is_ok() {
+                                    h.broadcast(&room, conn_id, Message::Binary(data));
+                                    send_ack(
+                                        &tx,
+                                        crdt,
+                                        &room.room,
+                                        batch_id,
+                                        UpdateStatusCode::Ok,
+                                    );
+                                } else {
+                                    send_ack(
+                                        &tx,
+                                        crdt,
+                                        &room.room,
+                                        batch_id,
+                                        UpdateStatusCode::InvalidUpdate,
+                                    );
                                 }
                             }
                         }
@@ -1368,18 +1397,4 @@ where
     let _ = sink_task.await;
     debug!(conn_id, "connection closed and cleaned up");
     Ok(())
-}
-
-fn parse_docupdate_payload(buf: &[u8]) -> Result<Vec<Vec<u8>>, String> {
-    let mut r = BytesReader::new(buf);
-    let n = usize::try_from(r.read_uleb128()?).map_err(|_| "length too large".to_string())?;
-    let mut out: Vec<Vec<u8>> = Vec::with_capacity(n);
-    for _ in 0..n {
-        let b = r.read_var_bytes()?.to_vec();
-        out.push(b);
-    }
-    if r.remaining() != 0 {
-        return Err("trailing bytes".into());
-    }
-    Ok(out)
 }

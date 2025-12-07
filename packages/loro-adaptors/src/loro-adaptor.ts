@@ -1,15 +1,17 @@
 import { LoroDoc, VersionVector } from "loro-crdt";
 import {
   CrdtType,
-  JoinError,
   JoinResponseOk,
-  UpdateError,
 } from "loro-protocol";
 import type { CrdtAdaptorContext, CrdtDocAdaptor } from "./types";
 
 export interface LoroAdaptorConfig {
   onImportError?: (error: Error, data: Uint8Array[]) => void;
-  onUpdateError?: (error: UpdateError) => void;
+  onUpdateError?: (
+    updates: Uint8Array[],
+    errorCode: number,
+    reason?: string
+  ) => void;
 }
 
 export class LoroAdaptor implements CrdtDocAdaptor {
@@ -55,8 +57,6 @@ export class LoroAdaptor implements CrdtDocAdaptor {
     return this.doc.version().compare(vv) as 0 | 1 | -1 | undefined;
   }
 
-  handleJoinErr?: ((err: JoinError) => Promise<void>) | undefined;
-
   getDoc(): LoroDoc {
     return this.doc;
   }
@@ -77,6 +77,14 @@ export class LoroAdaptor implements CrdtDocAdaptor {
 
   getAlternativeVersion(_currentVersion: Uint8Array): Uint8Array | undefined {
     return undefined;
+  }
+
+  onUpdateError(
+    updates: Uint8Array[],
+    errorCode: number,
+    reason?: string
+  ): void {
+    this.config.onUpdateError?.(updates, errorCode, reason);
   }
 
   async handleJoinOk(res: JoinResponseOk): Promise<void> {
@@ -110,7 +118,7 @@ export class LoroAdaptor implements CrdtDocAdaptor {
         this.ctx?.send([updates]);
       }
     } catch (error) {
-      this.ctx!.onJoinFailed(
+      this.ctx?.onJoinFailed(
         error instanceof Error ? error.message : String(error)
       );
       throw error;
@@ -126,7 +134,11 @@ export class LoroAdaptor implements CrdtDocAdaptor {
         // Pending updates may occur when concurrent changes happen
       }
     } catch (error) {
-      this.ctx!.onImportError(
+      this.config.onImportError?.(
+        error instanceof Error ? error : new Error(String(error)),
+        updates
+      );
+      this.ctx?.onImportError(
         error instanceof Error ? error : new Error(String(error)),
         updates
       );
@@ -139,12 +151,6 @@ export class LoroAdaptor implements CrdtDocAdaptor {
       if (comparison != null && comparison >= 0) {
         this.reachServerVersionPromise.resolve();
       }
-    }
-  }
-
-  handleUpdateError(error: UpdateError): void {
-    if (this.config.onUpdateError) {
-      this.config.onUpdateError(error);
     }
   }
 
