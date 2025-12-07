@@ -14,8 +14,6 @@ import {
 } from "loro-protocol";
 import { EloAdaptor } from "loro-adaptors/loro";
 
-let skip = false;
-
 // Make WebSocket available globally for the client
 Object.defineProperty(globalThis, "WebSocket", {
   value: WebSocket,
@@ -291,13 +289,10 @@ describe("E2E: %ELO decrypt failure and unknown key handling", () => {
   });
 
   afterAll(async () => {
-    if (!skip && server) {
-      await server.stop();
-    }
+    await server.stop();
   }, 15000);
 
   it("client reports decrypt error for unknown keyId", async () => {
-    if (skip) return;
     const client1 = new LoroWebsocketClient({ url: `ws://localhost:${port}` });
     const client2 = new LoroWebsocketClient({ url: `ws://localhost:${port}` });
     await Promise.all([client1.waitConnected(), client2.waitConnected()]);
@@ -371,7 +366,7 @@ async function waitForJoinOk(ws: WebSocket): Promise<void> {
           clearTimeout(t);
           resolve();
         }
-      } catch {}
+      } catch { }
     });
   });
 }
@@ -388,7 +383,7 @@ async function waitForAck(ws: WebSocket): Promise<Ack> {
           clearTimeout(t);
           resolve(msg);
         }
-      } catch {}
+      } catch { }
     });
   });
 }

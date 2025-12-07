@@ -23,7 +23,6 @@ Object.defineProperty(globalThis, "WebSocket", {
 describe("E2E: onUpdateError", () => {
   let server: WebSocketServer;
   let port: number;
-  let skip = false;
   let lastUpdates: Uint8Array[] = [];
 
   beforeAll(async () => {
@@ -39,13 +38,11 @@ describe("E2E: onUpdateError", () => {
         });
       });
     } catch (e) {
-      skip = true;
       console.warn("Skipping onUpdateError e2e: cannot start ws server", e);
     }
   });
 
   afterAll(async () => {
-    if (skip || !server) return;
     for (const client of server.clients) {
       try {
         client.terminate();
@@ -59,8 +56,6 @@ describe("E2E: onUpdateError", () => {
   });
 
   it("invokes adaptor onUpdateError with original batch", async () => {
-    if (skip) return;
-
     const errors: Array<{ updates: Uint8Array[]; code: number; reason?: string }> = [];
     const adaptor = new LoroAdaptor(undefined, {
       onUpdateError: (updates, code, reason) => {
