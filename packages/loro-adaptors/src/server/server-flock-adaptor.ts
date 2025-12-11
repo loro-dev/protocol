@@ -1,4 +1,4 @@
-import { Flock } from "@loro-dev/flock";
+import { Flock, decodeVersionVector, encodeVersionVector } from "@loro-dev/flock";
 import type {
   ExportBundle as FlockExportBundle,
   VersionVector as FlockVersion,
@@ -29,45 +29,6 @@ function deserializeBundle(bytes: Uint8Array): FlockExportBundle {
     // ignore malformed payloads
   }
   return { version: 0, entries: {} };
-}
-
-function serializeVersion(version: FlockVersion | undefined): Uint8Array {
-  return encoder.encode(JSON.stringify(version ?? {}));
-}
-
-function deserializeVersion(bytes: Uint8Array): FlockVersion {
-  if (!bytes.length) {
-    return {};
-  }
-  try {
-    const parsed = JSON.parse(decoder.decode(bytes));
-    if (!parsed || typeof parsed !== "object") {
-      return {};
-    }
-    const next: FlockVersion = {};
-    for (const [peer, value] of Object.entries(
-      parsed as Record<string, unknown>,
-    )) {
-      if (!value || typeof value !== "object") {
-        continue;
-      }
-      const entry = value as { logicalCounter?: unknown; physicalTime?: unknown };
-      const logicalCounter =
-        typeof entry.logicalCounter === "number" &&
-          Number.isFinite(entry.logicalCounter)
-          ? Math.trunc(entry.logicalCounter)
-          : 0;
-      const physicalTime =
-        typeof entry.physicalTime === "number" &&
-          Number.isFinite(entry.physicalTime)
-          ? entry.physicalTime
-          : 0;
-      next[peer] = { logicalCounter, physicalTime };
-    }
-    return next;
-  } catch {
-    return {};
-  }
 }
 
 function importSnapshot(flock: Flock, data: Uint8Array): void {
@@ -112,11 +73,11 @@ export class FlockServerAdaptor implements CrdtServerAdaptor {
     const flock = new Flock();
     importSnapshot(flock, documentData);
 
-    const serverVersion = serializeVersion(flock.version());
+    const serverVersion = encodeVersionVector(flock.version());
     let updates: Uint8Array[] | undefined;
 
     if (clientVersion.length > 0) {
-      const clientVV = deserializeVersion(clientVersion);
+      const clientVV = decodeVersionVector(clientVersion);
       const delta = exportBundle(flock, clientVV);
       updates = [serializeBundle(delta)];
     } else if (documentData.length > 0) {
@@ -167,7 +128,7 @@ export class FlockServerAdaptor implements CrdtServerAdaptor {
   getVersion(documentData: Uint8Array): Uint8Array {
     const flock = new Flock();
     importSnapshot(flock, documentData);
-    return serializeVersion(flock.version());
+    return encodeVersionVector(flock.version());
   }
 
   merge(documents: Uint8Array[]): Uint8Array {

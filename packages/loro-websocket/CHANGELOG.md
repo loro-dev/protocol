@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### ⚠ BREAKING CHANGES
+
+* Flock client/server adaptors now emit binary-encoded version vectors using `@loro-dev/flock`'s `encodeVersionVector`; prior JSON encoding is no longer supported.
+
 ## [0.5.0](https://github.com/loro-dev/protocol/compare/loro-websocket-v0.4.3...loro-websocket-v0.5.0) (2025-12-07)
 
 

@@ -1,4 +1,4 @@
-import { Flock } from "@loro-dev/flock";
+import { Flock, decodeVersionVector, encodeVersionVector } from "@loro-dev/flock";
 import {
   CrdtType,
   JoinResponseOk,
@@ -10,42 +10,6 @@ type FlockExportBundle = Awaited<ReturnType<Flock["exportJson"]>>;
 
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
-
-function serializeVersion(version: FlockVersion | undefined): Uint8Array {
-  return encoder.encode(JSON.stringify(version ?? {}));
-}
-
-function deserializeVersion(bytes: Uint8Array): FlockVersion {
-  if (!bytes.length) return {};
-  try {
-    const parsed = JSON.parse(decoder.decode(bytes));
-    if (!parsed || typeof parsed !== "object") return {};
-    const next: FlockVersion = {};
-    for (const [key, value] of Object.entries(
-      parsed as Record<string, unknown>
-    )) {
-      if (!value || typeof value !== "object") continue;
-      const entry = value as {
-        logicalCounter?: unknown;
-        physicalTime?: unknown;
-      };
-      const logicalCounter =
-        typeof entry.logicalCounter === "number" &&
-          Number.isFinite(entry.logicalCounter)
-          ? Math.trunc(entry.logicalCounter)
-          : 0;
-      const physicalTime =
-        typeof entry.physicalTime === "number" &&
-          Number.isFinite(entry.physicalTime)
-          ? entry.physicalTime
-          : 0;
-      next[key] = { logicalCounter, physicalTime };
-    }
-    return next;
-  } catch {
-    return {};
-  }
-}
 
 function compareVersions(
   a: FlockVersion,
@@ -145,8 +109,12 @@ export class FlockAdaptor implements CrdtDocAdaptor {
   }
 
   cmpVersion(versionBytes: Uint8Array): 0 | 1 | -1 | undefined {
-    const remote = deserializeVersion(versionBytes);
-    return compareVersions(this.flock.version(), remote);
+    try {
+      const remote = decodeVersionVector(versionBytes);
+      return compareVersions(this.flock.version(), remote);
+    } catch {
+      return undefined;
+    }
   }
 
   setCtx(ctx: CrdtAdaptorContext): void {
@@ -167,7 +135,7 @@ export class FlockAdaptor implements CrdtDocAdaptor {
   }
 
   getVersion(): Uint8Array {
-    return serializeVersion(this.flock.version());
+    return encodeVersionVector(this.flock.version());
   }
 
   getAlternativeVersion(): Uint8Array | undefined {
@@ -185,7 +153,7 @@ export class FlockAdaptor implements CrdtDocAdaptor {
   async handleJoinOk(res: JoinResponseOk): Promise<void> {
     if (this.destroyed) return;
     try {
-      const serverVersion = deserializeVersion(res.version);
+      const serverVersion = decodeVersionVector(res.version);
       this.initServerVersion = serverVersion;
       const comparison = compareVersions(this.flock.version(), serverVersion);
       if (comparison != null && comparison >= 0) {
