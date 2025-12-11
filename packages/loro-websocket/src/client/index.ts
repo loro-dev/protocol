@@ -106,6 +106,8 @@ export interface LoroWebsocketClientOptions {
   disablePing?: boolean;
   /** Optional callback for low-level ws close (before status transitions). */
   onWsClose?: () => void;
+  /** Optional callback for any client-level errors (socket error, decode/apply failures, send on closed, etc.). */
+  onError?: (error: Error) => void;
   /**
    * Reconnect policy (kept minimal).
    * - enabled: toggle auto-retry (default true)
@@ -374,7 +376,15 @@ export class LoroWebsocketClient {
 
     this.setStatus(ClientStatus.Connecting);
 
-    const ws = new WebSocket(this.ops.url);
+    let ws: WebSocket;
+    try {
+      ws = new WebSocket(this.ops.url);
+    } catch (err) {
+      const error = err instanceof Error ? err : new Error(String(err));
+      this.rejectConnected?.(error);
+      this.setStatus(ClientStatus.Disconnected);
+      throw error;
+    }
     this.ws = ws;
 
     if (current && current !== ws) {
@@ -399,7 +409,9 @@ export class LoroWebsocketClient {
       this.onSocketClose(ws, event);
     };
     const message = (event: MessageEvent<string | ArrayBuffer>) => {
-      void this.onSocketMessage(ws, event);
+      void this.onSocketMessage(ws, event).catch(err => {
+        this.emitError(err instanceof Error ? err : new Error(String(err)));
+      });
     };
 
     ws.addEventListener("open", open);
@@ -439,6 +451,7 @@ export class LoroWebsocketClient {
     if (ws !== this.ws) {
       this.detachSocketListeners(ws);
     }
+    this.emitError(new Error("WebSocket error"));
     // Leave further handling to the close event for the active socket
   }
 
@@ -515,20 +528,24 @@ export class LoroWebsocketClient {
     if (ws !== this.ws) {
       return;
     }
-    if (typeof event.data === "string") {
-      if (event.data === "ping") {
-        ws.send("pong");
-        return;
+    try {
+      if (typeof event.data === "string") {
+        if (event.data === "ping") {
+          this.safeSend(ws, "pong", "pong");
+          return;
+        }
+        if (event.data === "pong") {
+          this.handlePong();
+          return;
+        }
+        return; // ignore other texts
       }
-      if (event.data === "pong") {
-        this.handlePong();
-        return;
-      }
-      return; // ignore other texts
+      const dataU8 = new Uint8Array(event.data);
+      const msg = tryDecode(dataU8);
+      if (msg != null) await this.handleMessage(msg);
+    } catch (err) {
+      this.emitError(err instanceof Error ? err : new Error(String(err)));
     }
-    const dataU8 = new Uint8Array(event.data);
-    const msg = tryDecode(dataU8);
-    if (msg != null) await this.handleMessage(msg);
   }
 
   private scheduleReconnect(immediate = false) {
@@ -633,12 +650,7 @@ export class LoroWebsocketClient {
     } as JoinRequest);
 
     try {
-      if (this.ws && this.ws.readyState === WebSocket.OPEN) {
-        this.ws.send(payload);
-      } else {
-        this.enqueueJoin(payload);
-        void this.connect();
-      }
+      this.sendJoinPayload(payload);
       this.emitRoomStatus(id, RoomJoinStatus.Reconnecting);
     } catch (e) {
       console.error("Failed to send rejoin request:", e);
@@ -735,17 +747,14 @@ export class LoroWebsocketClient {
       this.fragmentBatches.delete(batchKey);
       // Notify server to prompt resend
       try {
-        if (this.ws && this.ws.readyState === WebSocket.OPEN) {
-          this.ws.send(
-            encode({
-              type: MessageType.Ack,
-              crdt: msg.crdt,
-              roomId: msg.roomId,
-              refId: msg.batchId,
-              status: UpdateStatusCode.FragmentTimeout,
-            } as Ack)
-          );
-        }
+        const payload = encode({
+          type: MessageType.Ack,
+          crdt: msg.crdt,
+          roomId: msg.roomId,
+          refId: msg.batchId,
+          status: UpdateStatusCode.FragmentTimeout,
+        } as Ack);
+        this.safeSend(this.ws, payload, "fragment-timeout-ack");
       } catch { }
     }, 10000);
 
@@ -859,27 +868,25 @@ export class LoroWebsocketClient {
         pending.adaptor.getAlternativeVersion?.(currentVersion);
       if (alternativeVersion) {
         // Retry with alternative version format
-        this.ws.send(
-          encode({
-            type: MessageType.JoinRequest,
-            crdt: pending.adaptor.crdtType,
-            roomId: pending.roomId,
-            auth: authValue,
-            version: alternativeVersion,
-          } as JoinRequest)
-        );
+        const payload = encode({
+          type: MessageType.JoinRequest,
+          crdt: pending.adaptor.crdtType,
+          roomId: pending.roomId,
+          auth: authValue,
+          version: alternativeVersion,
+        } as JoinRequest);
+        this.sendJoinPayload(payload);
         return;
       } else {
         console.warn("Version unknown. Now join with an empty version");
-        this.ws.send(
-          encode({
-            type: MessageType.JoinRequest,
-            crdt: pending.adaptor.crdtType,
-            roomId: pending.roomId,
-            auth: authValue,
-            version: new Uint8Array(),
-          } as JoinRequest)
-        );
+        const payload = encode({
+          type: MessageType.JoinRequest,
+          crdt: pending.adaptor.crdtType,
+          roomId: pending.roomId,
+          auth: authValue,
+          version: new Uint8Array(),
+        } as JoinRequest);
+        this.sendJoinPayload(payload);
         return;
       }
     }
@@ -940,15 +947,23 @@ export class LoroWebsocketClient {
         },
         timeoutId,
       };
-      this.pingWaiters.push(waiter);
-      try {
-        if (this.awaitingPongSince == null) this.awaitingPongSince = Date.now();
-        this.ws.send("ping");
-      } catch (e) {
-        this.pingWaiters.pop();
-        clearTimeout(timeoutId);
-        reject(e instanceof Error ? e : new Error(String(e)));
+
+      // If there's already a pending ping, just wait for the pong
+      if (this.awaitingPongSince != null) {
+        this.pingWaiters.push(waiter);
+        return;
       }
+
+      // Try to send ping; if it fails, reject immediately instead of waiting for timeout
+      const sent = this.safeSend(this.ws, "ping", "ping");
+      if (!sent) {
+        clearTimeout(timeoutId);
+        reject(new Error("Failed to send ping: WebSocket not open"));
+        return;
+      }
+
+      this.awaitingPongSince = Date.now();
+      this.pingWaiters.push(waiter);
     });
   }
 
@@ -1011,14 +1026,16 @@ export class LoroWebsocketClient {
         },
         onJoinFailed: (reason: string) => {
           console.error(`Join failed: ${reason}`);
-          this.ws.send(
+          this.safeSend(
+            this.ws,
             encode({
               type: MessageType.JoinError,
               crdt: crdtAdaptor.crdtType,
               roomId,
               code: JoinErrorCode.AppError,
               message: reason,
-            } as JoinError)
+            } as JoinError),
+            "join-error"
           );
           reject(new Error(`Join failed: ${reason}`));
         },
@@ -1068,13 +1085,7 @@ export class LoroWebsocketClient {
           version: crdtAdaptor.getVersion(),
         } as JoinRequest);
 
-        if (this.ws && this.ws.readyState === WebSocket.OPEN) {
-          this.ws.send(joinPayload);
-        } else {
-          this.enqueueJoin(joinPayload);
-          // ensure a connection attempt is running
-          void this.connect();
-        }
+        this.sendJoinPayload(joinPayload);
       })
       .catch(err => {
         const error = err instanceof Error ? err : new Error(String(err));
@@ -1096,6 +1107,7 @@ export class LoroWebsocketClient {
     this.clearPingTimer();
     this.reconnectAttempts = 0;
     this.rejectConnected?.(new Error("Disconnected"));
+    void this.connectedPromise?.catch(() => { });
     this.rejectConnected = undefined;
     this.resolveConnected = undefined;
     this.rejectAllPingWaiters(new Error("Disconnected"));
@@ -1147,14 +1159,16 @@ export class LoroWebsocketClient {
 
     if (update.length <= FRAG_LIMIT) {
       // Send as a single DocUpdate with one update entry
-      ws.send(
+      this.safeSend(
+        ws,
         encode({
           type: MessageType.DocUpdate,
           crdt,
           roomId,
           updates: [update],
           batchId,
-        } as DocUpdate)
+        } as DocUpdate),
+        "send-update"
       );
       return;
     }
@@ -1170,7 +1184,7 @@ export class LoroWebsocketClient {
       fragmentCount,
       totalSizeBytes: update.length,
     };
-    ws.send(encode(header));
+    this.safeSend(ws, encode(header), "send-fragment-header");
 
     for (let i = 0; i < fragmentCount; i++) {
       const start = i * FRAG_LIMIT;
@@ -1184,19 +1198,20 @@ export class LoroWebsocketClient {
         index: i,
         fragment,
       };
-      ws.send(encode(msg));
+      this.safeSend(ws, encode(msg), "send-fragment");
     }
   }
 
   /** @internal Send Leave on the current websocket. */
   sendLeave(crdt: CrdtType, roomId: string) {
-    if (!this.ws || this.ws.readyState !== WebSocket.OPEN) return;
-    this.ws.send(
+    this.safeSend(
+      this.ws,
       encode({
         type: MessageType.Leave,
         crdt,
         roomId,
-      } as Leave)
+      } as Leave),
+      "leave"
     );
   }
 
@@ -1226,6 +1241,7 @@ export class LoroWebsocketClient {
     this.clearPingTimer();
     this.reconnectAttempts = 0;
     this.rejectConnected?.(new Error("Destroyed"));
+    void this.connectedPromise?.catch(() => { });
     this.rejectConnected = undefined;
     this.resolveConnected = undefined;
     this.rejectAllPingWaiters(new Error("Destroyed"));
@@ -1272,8 +1288,14 @@ export class LoroWebsocketClient {
       return typeof raw === "number" ? raw : undefined;
     };
 
+    const safeClose = () => {
+      try {
+        ws.close(code, reason);
+      } catch { }
+    };
+
     if (readBufferedAmount() == null) {
-      ws.close(code, reason);
+      safeClose();
       return;
     }
 
@@ -1284,7 +1306,7 @@ export class LoroWebsocketClient {
       const state = ws.readyState;
       if (state === WebSocket.CLOSED || state === WebSocket.CLOSING) {
         requested = true;
-        ws.close(code, reason);
+        safeClose();
         return;
       }
 
@@ -1295,7 +1317,7 @@ export class LoroWebsocketClient {
         Date.now() - start >= timeoutMs
       ) {
         requested = true;
-        ws.close(code, reason);
+        safeClose();
         return;
       }
 
@@ -1344,8 +1366,9 @@ export class LoroWebsocketClient {
         if (this.ws && this.ws.readyState === WebSocket.OPEN) {
           // Avoid overlapping RTT probes
           if (this.awaitingPongSince == null) {
-            this.awaitingPongSince = Date.now();
-            this.ws.send("ping");
+            if (this.safeSend(this.ws, "ping", "ping")) {
+              this.awaitingPongSince = Date.now();
+            }
           } else {
             // Still awaiting a pong; skip sending another ping
           }
@@ -1437,9 +1460,40 @@ export class LoroWebsocketClient {
     return Math.min(max, Math.max(0, Math.floor(withJitter)));
   }
 
+  private safeSend(
+    ws: WebSocket | undefined,
+    data: Parameters<WebSocket["send"]>[0],
+    context?: string
+  ): boolean {
+    if (!ws || ws !== this.ws) return false;
+    if (ws.readyState !== WebSocket.OPEN) {
+      if (context) {
+        this.emitError(new Error(`WebSocket not open during ${context}`));
+      }
+      return false;
+    }
+    try {
+      ws.send(data);
+      return true;
+    } catch (err) {
+      this.emitError(err instanceof Error ? err : new Error(String(err)));
+      return false;
+    }
+  }
+
   private logCbError(context: string, err: unknown) {
     // eslint-disable-next-line no-console
     console.error(`[loro-websocket] ${context} callback threw`, err);
+    this.emitError(err instanceof Error ? err : new Error(String(err)));
+  }
+
+  private emitError(err: Error) {
+    try {
+      this.ops.onError?.(err);
+    } catch (cbErr) {
+      // eslint-disable-next-line no-console
+      console.error("[loro-websocket] onError callback threw", cbErr);
+    }
   }
 
   private isFatalClose(code?: number, reason?: string): boolean {
@@ -1451,6 +1505,12 @@ export class LoroWebsocketClient {
 
   private enqueueJoin(payload: Uint8Array) {
     this.queuedJoins.push(payload);
+  }
+
+  private sendJoinPayload(payload: Uint8Array) {
+    if (this.safeSend(this.ws, payload, "join")) return;
+    this.enqueueJoin(payload);
+    void this.connect();
   }
 
   private flushQueuedJoins() {
