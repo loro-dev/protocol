@@ -14,7 +14,7 @@ See `protocol.md` for the full wire spec.
 - `packages/loro-websocket` (MIT): WebSocket client + a SimpleServer for local testing
 - `packages/loro-adaptors` (MIT): Shared CRDT adaptors for Loro documents and ephemeral state
 
-Rust workspace (AGPL):
+Rust workspace (MIT):
 
 - `rust/loro-protocol`: Rust encoder/decoder mirroring the TS implementation
 - `rust/loro-websocket-client`: Async WS client for the protocol
