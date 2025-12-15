@@ -108,7 +108,7 @@ type AuthFuture =
     Pin<Box<dyn Future<Output = Result<Option<Permission>, String>> + Send + 'static>>;
 type AuthFn = Arc<dyn Fn(String, CrdtType, Vec<u8>) -> AuthFuture + Send + Sync>;
 
-type HandshakeAuthFn = dyn Fn(&str, Option<&str>) -> bool + Send + Sync;
+type HandshakeAuthFn = dyn Fn(&str, Option<&str>, &HashMap<String, String>) -> bool + Send + Sync;
 
 #[derive(Clone)]
 pub struct ServerConfig<DocCtx = ()> {
@@ -122,6 +122,7 @@ pub struct ServerConfig<DocCtx = ()> {
     /// Parameters:
     /// - `workspace_id`: extracted from request path `/{workspace}` (empty if missing)
     /// - `token`: `token` query parameter if present
+    /// - `cookies`: parsed cookies from `Cookie` header
     ///
     /// Return true to accept, false to reject with 401.
     pub handshake_auth: Option<Arc<HandshakeAuthFn>>,
@@ -925,7 +926,19 @@ where
                     None
                 });
 
-                let allowed = (check)(workspace_id, token);
+                // Parse cookies
+                let mut cookies = HashMap::new();
+                if let Some(header) = req.headers().get("Cookie") {
+                    if let Ok(s) = header.to_str() {
+                        for cookie in cookie::Cookie::split_parse(s) {
+                            if let Ok(c) = cookie {
+                                cookies.insert(c.name().to_string(), c.value().to_string());
+                            }
+                        }
+                    }
+                }
+
+                let allowed = (check)(workspace_id, token, &cookies);
                 if !allowed {
                     warn!(workspace=%workspace_id, token=?token, "handshake auth denied");
                     // Build a 401 Unauthorized response

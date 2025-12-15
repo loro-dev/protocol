@@ -9,7 +9,7 @@ async fn reject_update_without_join() {
     let addr = listener.local_addr().unwrap();
     let server_task = tokio::spawn(async move {
         let cfg: server::ServerConfig<()> = server::ServerConfig {
-            handshake_auth: Some(Arc::new(|_ws, token| token == Some("secret"))),
+            handshake_auth: Some(Arc::new(|_ws, token, _cookies| token == Some("secret"))),
             ..Default::default()
         };
         server::serve_incoming_with_config(listener, cfg)

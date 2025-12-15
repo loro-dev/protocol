@@ -1,6 +1,7 @@
 import { WebSocketServer, WebSocket } from "ws";
 import { randomBytes } from "node:crypto";
 import type { RawData } from "ws";
+import type { IncomingMessage } from "http";
 // no direct CRDT imports here; handled by CrdtDoc implementations
 import {
   encode,
@@ -47,6 +48,13 @@ export interface SimpleServerConfig {
     crdtType: CrdtType,
     auth: Uint8Array
   ) => Promise<Permission | null>;
+  /**
+   * Optional handshake auth: called during WS HTTP upgrade.
+   * Return true to accept, false to reject.
+   */
+  handshakeAuth?: (
+    req: IncomingMessage
+  ) => boolean | Promise<boolean>;
 }
 
 interface RoomDocument {
@@ -86,11 +94,27 @@ export class SimpleServer {
 
   start(): Promise<void> {
     return new Promise(resolve => {
-      const options: { port: number; host?: string } = {
+      const options: { port: number; host?: string; verifyClient?: any } = {
         port: this.config.port,
       };
       if (this.config.host) {
         options.host = this.config.host;
+      }
+      if (this.config.handshakeAuth) {
+        options.verifyClient = (
+          info: { origin: string; secure: boolean; req: IncomingMessage },
+          cb: (res: boolean, code?: number, message?: string) => void
+        ) => {
+          Promise.resolve(this.config.handshakeAuth!(info.req))
+            .then(allowed => {
+              if (allowed) cb(true);
+              else cb(false, 401, "Unauthorized");
+            })
+            .catch(err => {
+              console.error("Handshake auth error", err);
+              cb(false, 500, "Internal Server Error");
+            });
+        };
       }
       this.wss = new WebSocketServer(options);
 

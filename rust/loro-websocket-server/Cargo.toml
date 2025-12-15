@@ -20,6 +20,7 @@ tokio-tungstenite = "0.27"
 futures-util = { version = "0.3", default-features = false, features = ["sink"] }
 loro = "1"
 tracing = "0.1"
+cookie = "0.18.1"
 
 [dev-dependencies]
 loro-websocket-client = { version = "0.1.0", path = "../loro-websocket-client" }

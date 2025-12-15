@@ -13,7 +13,7 @@ async fn join_denied_returns_error() {
     let cfg: server::ServerConfig<()> = server::ServerConfig {
         authenticate: Some(Arc::new(|_room, _crdt, _auth| Box::pin(async { Ok(None) }))),
         default_permission: Permission::Write,
-        handshake_auth: Some(Arc::new(|_ws, token| token == Some("secret"))),
+        handshake_auth: Some(Arc::new(|_ws, token, _cookies| token == Some("secret"))),
         ..Default::default()
     };
     let server_task = tokio::spawn(async move {

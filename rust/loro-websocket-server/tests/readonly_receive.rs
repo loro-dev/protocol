@@ -24,7 +24,7 @@ async fn readonly_receives_updates_writer_sends() {
             })
         })),
         default_permission: Permission::Write,
-        handshake_auth: Some(Arc::new(|_ws, token| token == Some("secret"))),
+        handshake_auth: Some(Arc::new(|_ws, token, _cookies| token == Some("secret"))),
         ..Default::default()
     };
     let server_task = tokio::spawn(async move {
