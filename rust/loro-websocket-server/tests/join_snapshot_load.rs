@@ -24,7 +24,7 @@ async fn join_sends_snapshot_from_loader() {
                 })
             })
         })),
-        handshake_auth: Some(Arc::new(|_ws, token, _req| token == Some("secret"))),
+        handshake_auth: Some(Arc::new(|args| args.token == Some("secret"))),
         ..Default::default()
     };
     let server_task = tokio::spawn(async move {

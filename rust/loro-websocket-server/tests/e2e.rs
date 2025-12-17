@@ -14,7 +14,7 @@ async fn e2e_sync_two_clients_docupdate_roundtrip() {
     let addr = listener.local_addr().unwrap();
     let server_task = tokio::spawn(async move {
         let cfg: Cfg = server::ServerConfig {
-            handshake_auth: Some(Arc::new(|_ws, token, _req| token == Some("secret"))),
+            handshake_auth: Some(Arc::new(|args| args.token == Some("secret"))),
             ..Default::default()
         };
         server::serve_incoming_with_config(listener, cfg)
@@ -65,7 +65,7 @@ async fn workspaces_are_isolated() {
     let addr = listener.local_addr().unwrap();
     let server_task = tokio::spawn(async move {
         let cfg: Cfg = server::ServerConfig {
-            handshake_auth: Some(Arc::new(|_ws, token, _req| token == Some("secret"))),
+            handshake_auth: Some(Arc::new(|args| args.token == Some("secret"))),
             ..Default::default()
         };
         server::serve_incoming_with_config(listener, cfg)
@@ -104,7 +104,7 @@ async fn e2e_sync_two_clients_loro_adaptor_roundtrip() {
     let addr = listener.local_addr().unwrap();
     let server_task = tokio::spawn(async move {
         let cfg: Cfg = server::ServerConfig {
-            handshake_auth: Some(Arc::new(|_ws, token, _req| token == Some("secret"))),
+            handshake_auth: Some(Arc::new(|args| args.token == Some("secret"))),
             ..Default::default()
         };
         server::serve_incoming_with_config(listener, cfg)
@@ -154,7 +154,7 @@ async fn e2e_sync_two_clients_elo_adaptor_roundtrip() {
     let addr = listener.local_addr().unwrap();
     let server_task = tokio::spawn(async move {
         let cfg: Cfg = server::ServerConfig {
-            handshake_auth: Some(Arc::new(|_ws, token, _req| token == Some("secret"))),
+            handshake_auth: Some(Arc::new(|args| args.token == Some("secret"))),
             ..Default::default()
         };
         server::serve_incoming_with_config(listener, cfg)

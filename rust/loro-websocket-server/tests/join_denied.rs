@@ -11,9 +11,9 @@ async fn join_denied_returns_error() {
 
     // Server with auth that always denies
     let cfg: server::ServerConfig<()> = server::ServerConfig {
-        authenticate: Some(Arc::new(|_room, _crdt, _auth| Box::pin(async { Ok(None) }))),
+        authenticate: Some(Arc::new(|_args| Box::pin(async { Ok(None) }))),
         default_permission: Permission::Write,
-        handshake_auth: Some(Arc::new(|_ws, token, _req| token == Some("secret"))),
+        handshake_auth: Some(Arc::new(|args| args.token == Some("secret"))),
         ..Default::default()
     };
     let server_task = tokio::spawn(async move {

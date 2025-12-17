@@ -12,11 +12,11 @@ async fn readonly_receives_updates_writer_sends() {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
     let cfg: server::ServerConfig<()> = server::ServerConfig {
-        authenticate: Some(Arc::new(|_room, _crdt, auth| {
+        authenticate: Some(Arc::new(|args| {
             Box::pin(async move {
-                if auth == b"writer" {
+                if args.auth == b"writer" {
                     Ok(Some(Permission::Write))
-                } else if auth == b"reader" {
+                } else if args.auth == b"reader" {
                     Ok(Some(Permission::Read))
                 } else {
                     Ok(None)
@@ -24,7 +24,7 @@ async fn readonly_receives_updates_writer_sends() {
             })
         })),
         default_permission: Permission::Write,
-        handshake_auth: Some(Arc::new(|_ws, token, _req| token == Some("secret"))),
+        handshake_auth: Some(Arc::new(|args| args.token == Some("secret"))),
         ..Default::default()
     };
     let server_task = tokio::spawn(async move {
