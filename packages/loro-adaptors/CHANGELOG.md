@@ -6,6 +6,13 @@
 
 * Flock adaptors now encode version vectors using `@loro-dev/flock`'s binary `encodeVersionVector`; version payloads are no longer JSON.
 
+## [0.6.1](https://github.com/loro-dev/protocol/compare/loro-adaptors-v0.6.0...loro-adaptors-v0.6.1) (2025-12-29)
+
+
+### Features
+
+* **adaptors:** upgrade flock to 4.1.0 and use inclusiveVersion for sync check ([#45](https://github.com/loro-dev/protocol/issues/45)) ([b84eb63](https://github.com/loro-dev/protocol/commit/b84eb6304281f2a11aa9fa00946ba88246a8ae17))
+
 ## [0.6.0](https://github.com/loro-dev/protocol/compare/loro-adaptors-v0.5.0...loro-adaptors-v0.6.0) (2025-12-11)
 
 
