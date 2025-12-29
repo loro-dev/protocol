@@ -155,7 +155,7 @@ export class FlockAdaptor implements CrdtDocAdaptor {
     try {
       const serverVersion = decodeVersionVector(res.version);
       this.initServerVersion = serverVersion;
-      const comparison = compareVersions(this.flock.version(), serverVersion);
+      const comparison = compareVersions(this.flock.inclusiveVersion(), serverVersion);
       if (comparison != null && comparison >= 0) {
         this.markReachedServerVersion();
       }
@@ -195,7 +195,7 @@ export class FlockAdaptor implements CrdtDocAdaptor {
     this.lastExportVersion = (this.flock.version());
     if (this.initServerVersion && !this.hasReachedServerVersion) {
       const comparison = compareVersions(
-        this.flock.version(),
+        this.flock.inclusiveVersion(),
         this.initServerVersion
       );
       if (comparison != null && comparison >= 0) {
