@@ -105,6 +105,19 @@ type SaveFuture = Pin<Box<dyn Future<Output = Result<(), String>> + Send + 'stat
 type LoadFn<DocCtx> = Arc<dyn Fn(LoadDocArgs) -> LoadFuture<DocCtx> + Send + Sync>;
 type SaveFn<DocCtx> = Arc<dyn Fn(SaveDocArgs<DocCtx>) -> SaveFuture + Send + Sync>;
 
+/// Arguments provided to `on_update`.
+pub struct UpdateArgs<DocCtx> {
+    pub workspace: String,
+    pub room: String,
+    pub crdt: CrdtType,
+    pub conn_id: u64,
+    pub updates: Vec<Vec<u8>>,
+    pub ctx: Option<DocCtx>,
+}
+
+type UpdateFuture = Pin<Box<dyn Future<Output = ()> + Send + 'static>>;
+type UpdateFn<DocCtx> = Arc<dyn Fn(UpdateArgs<DocCtx>) -> UpdateFuture + Send + Sync>;
+
 /// Arguments provided to `authenticate`.
 pub struct AuthArgs {
     pub room: String,
@@ -143,6 +156,7 @@ type CloseConnectionFn =
 pub struct ServerConfig<DocCtx = ()> {
     pub on_load_document: Option<LoadFn<DocCtx>>,
     pub on_save_document: Option<SaveFn<DocCtx>>,
+    pub on_update: Option<UpdateFn<DocCtx>>,
     pub save_interval_ms: Option<u64>,
     pub default_permission: Permission,
     pub authenticate: Option<AuthFn>,
@@ -470,6 +484,7 @@ impl<DocCtx> Default for ServerConfig<DocCtx> {
         Self {
             on_load_document: None,
             on_save_document: None,
+            on_update: None,
             save_interval_ms: None,
             default_permission: Permission::Write,
             authenticate: None,
@@ -1297,6 +1312,21 @@ where
                             if let Some(buf) =
                                 h.add_fragment_and_maybe_finish(&room, batch_id, index, fragment)
                             {
+                                if let Some(hook) = h.config.on_update.clone() {
+                                    let ctx = h.docs.get(&room).and_then(|s| s.ctx.clone());
+                                    drop(h);
+                                    let args = UpdateArgs {
+                                        workspace: workspace_id.clone(),
+                                        room: room.room.clone(),
+                                        crdt,
+                                        conn_id,
+                                        updates: vec![buf.clone()],
+                                        ctx,
+                                    };
+                                    (hook)(args).await;
+                                    h = hub.lock().await;
+                                }
+
                                 // On completion: parse and apply to stored doc state if applicable
                                 let apply_result = match crdt {
                                     CrdtType::Loro
@@ -1374,6 +1404,22 @@ where
                                     continue;
                                 }
                                 let mut h = hub.lock().await;
+
+                                if let Some(hook) = h.config.on_update.clone() {
+                                    let ctx = h.docs.get(&room).and_then(|s| s.ctx.clone());
+                                    drop(h);
+                                    let args = UpdateArgs {
+                                        workspace: workspace_id.clone(),
+                                        room: room.room.clone(),
+                                        crdt,
+                                        conn_id,
+                                        updates: updates.clone(),
+                                        ctx,
+                                    };
+                                    (hook)(args).await;
+                                    h = hub.lock().await;
+                                }
+
                                 let apply_result = match crdt {
                                     CrdtType::Loro
                                     | CrdtType::LoroEphemeralStore
