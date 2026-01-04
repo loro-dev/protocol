@@ -94,7 +94,14 @@ export class SimpleServer {
 
   start(): Promise<void> {
     return new Promise(resolve => {
-      const options: { port: number; host?: string; verifyClient?: any } = {
+      const options: {
+        port: number;
+        host?: string;
+        verifyClient?: (
+          info: { origin: string; secure: boolean; req: IncomingMessage },
+          cb: (res: boolean, code?: number, message?: string) => void
+        ) => void;
+      } = {
         port: this.config.port,
       };
       if (this.config.host) {
