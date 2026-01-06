@@ -7,6 +7,7 @@ loro-protocol is a small, transport-agnostic syncing protocol for collaborative 
 - Transports: WebSocket or any integrity-preserving transport (e.g., WebRTC)
 
 See `protocol.md` for the full wire spec.
+See `http-push-sse-protocol.md` for an HTTP push + SSE transport profile (no wire format changes).
 
 ## Packages
 
