@@ -38,9 +38,16 @@ The goal is to reuse all message types, fragmentation rules, and semantics from 
 - Recommended headers:
   - `Content-Type: application/octet-stream`
   - `Content-Length: <frame size>`
-- Push responses MAY return a protocol frame (binary) when the exchange is naturally request/response:
-  - `JoinRequest` → `JoinResponseOk` / `JoinError`
-  - `DocUpdate` / fragments completing a batch → `Ack`
+- Response body: either empty or a single protocol frame (binary). If present, servers SHOULD use:
+  - `Content-Type: application/octet-stream`
+
+In this transport profile, two flows are defined as request/response pairs:
+
+- **Join:** when the client pushes a `JoinRequest`, the server MUST respond in the same HTTP response body with exactly one protocol frame:
+  - `JoinResponseOk`, or
+  - `JoinError`.
+- **Client-originated updates:** when the client pushes a `DocUpdate` (single frame), the server MUST respond with an `Ack` frame in the same HTTP response body.
+  - For fragmented updates, the server MUST emit exactly one `Ack` per batch ID; it is RECOMMENDED to return it as the HTTP response to the push that completes the batch (typically the final fragment), or earlier if it can reject immediately.
 
 For other push messages (e.g., `Leave`), the response body can be empty.
 
@@ -83,7 +90,7 @@ Security note: if the session key is sensitive, prefer cookie/header transport o
 
 ### Join handshake (`JoinRequest` → `JoinResponse*`)
 
-Recommended pattern:
+This profile defines the following pattern:
 
 1. Client issues a push with a `JoinRequest` frame.
 2. Server responds in the same HTTP response body with:
@@ -95,7 +102,7 @@ Rationale: SSE reconnections can drop in-flight frames; making join responses pa
 
 ### Client-originated updates (`DocUpdate*` → `Ack`)
 
-Recommended pattern:
+This profile defines the following pattern:
 
 - For `DocUpdate` (single frame):
   - Client pushes `DocUpdate`.
@@ -153,4 +160,3 @@ This profile assumes SSE can disconnect without replay. To recover:
 
 - Works for all CRDT magic types defined in `protocol.md` (including `%ELO` from `protocol-e2ee.md`).
 - `%ELO` payload semantics remain unchanged; only the transport encoding differs.
-
