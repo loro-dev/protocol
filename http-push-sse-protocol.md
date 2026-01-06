@@ -141,12 +141,13 @@ For SSE:
 
 ## Ordering and Concurrency
 
-HTTP push requests can arrive concurrently, which can break assumptions about fragment ordering.
+HTTP push requests can arrive concurrently, so receivers may observe frames out of order (for example, a `DocUpdateFragment` arriving before its `DocUpdateFragmentHeader`).
 
 Recommendations:
 
 - Serialize push handling per session key.
-- Enforce that `DocUpdateFragmentHeader` is observed before accepting fragments for that batch (or buffer until header arrives).
+- Enforce that `DocUpdateFragmentHeader` is observed before accepting fragments for that batch (or buffer fragments until the header arrives).
+- Fragments within a batch SHOULD be reassembled by `index` and MAY be accepted out of order once the header is known.
 - Use existing batch IDs as the correlation key for both fragments and `Ack`.
 
 ## Loss Recovery on SSE Reconnect
