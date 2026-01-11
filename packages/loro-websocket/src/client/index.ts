@@ -98,7 +98,7 @@ export type ClientStatusValue =
 export interface LoroWebsocketClientOptions {
   /** WebSocket URL (ws:// or wss://). */
   url: string;
-  /** Optional custom ping interval. Defaults to 30s. Set with `disablePing` to stop timers. */
+  /** Optional custom ping interval. Defaults to 20s. Set with `disablePing` to stop timers. */
   pingIntervalMs?: number;
   /** Ping timeout; after two consecutive misses the client will force-close and reconnect. Defaults to 10s. */
   pingTimeoutMs?: number;
@@ -1733,7 +1733,7 @@ function isPositive(v: unknown): v is number {
   return typeof v === "number" && isFinite(v) && v > 0;
 }
 
-// Use default 30s unless disabled
+// Use default 20s unless disabled
 function getPingIntervalMs(opts: {
   pingIntervalMs?: number;
   disablePing?: boolean;
@@ -1741,7 +1741,7 @@ function getPingIntervalMs(opts: {
   if (opts.disablePing) return undefined;
   const v = opts.pingIntervalMs;
   if (isPositive(v)) return v;
-  return 30_000;
+  return 20_000;
 }
 
 function createLoroWebsocketClientRoom(opts: {

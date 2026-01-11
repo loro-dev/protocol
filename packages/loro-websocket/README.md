@@ -68,7 +68,7 @@ new LoroWebsocketClient(options: LoroWebsocketClientOptions)
 
 interface LoroWebsocketClientOptions {
   url: string;                 // WebSocket URL (ws:// or wss://)
-  pingIntervalMs?: number;     // Periodic ping interval (default 30_000ms)
+  pingIntervalMs?: number;     // Periodic ping interval (default 20_000ms)
   disablePing?: boolean;       // Disable periodic pings entirely
   onWsClose?: () => void;      // Low‑level ws close callback (before status transitions)
 }
@@ -117,7 +117,7 @@ type ClientStatusValue = typeof ClientStatus[keyof typeof ClientStatus];
 ## Latency & Ping/Pong
 
 - Periodic pings
-  - By default, the client sends a text `"ping"` every 30s (configurable via `pingIntervalMs`) and expects a `"pong"`. This keeps the connection alive and measures round‑trip latency.
+  - By default, the client sends a text `"ping"` every 20s (configurable via `pingIntervalMs`) and expects a `"pong"`. This keeps the connection alive and measures round‑trip latency.
   - Set `disablePing: true` to turn off the timer.
 
 - On‑demand ping
