@@ -6,6 +6,18 @@
 
 * Flock client/server adaptors now emit binary-encoded version vectors using `@loro-dev/flock`'s `encodeVersionVector`; prior JSON encoding is no longer supported.
 
+## [0.6.3](https://github.com/loro-dev/protocol/compare/loro-websocket-v0.6.2...loro-websocket-v0.6.3) (2026-01-11)
+
+
+### Features
+
+* Support cookies when authenticating websockets ([#44](https://github.com/loro-dev/protocol/issues/44)) ([903eb9c](https://github.com/loro-dev/protocol/commit/903eb9c2312caa71b883166281ef3a3076517022))
+
+
+### Bug Fixes
+
+* resolve lint errors in handshake-auth.test.ts and simple-server.ts ([#49](https://github.com/loro-dev/protocol/issues/49)) ([206fa93](https://github.com/loro-dev/protocol/commit/206fa93b93cfedf25f7b40d60d667ef5ce9ef619))
+
 ## [0.6.2](https://github.com/loro-dev/protocol/compare/loro-websocket-v0.6.1...loro-websocket-v0.6.2) (2026-01-04)
 
 
