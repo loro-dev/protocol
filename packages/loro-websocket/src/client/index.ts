@@ -98,7 +98,7 @@ export type ClientStatusValue =
 export interface LoroWebsocketClientOptions {
   /** WebSocket URL (ws:// or wss://). */
   url: string;
-  /** Optional custom ping interval. Defaults to 30s. Set with `disablePing` to stop timers. */
+  /** Optional custom ping interval. Defaults to 20s. Set with `disablePing` to stop timers. */
   pingIntervalMs?: number;
   /** Ping timeout; after two consecutive misses the client will force-close and reconnect. Defaults to 10s. */
   pingTimeoutMs?: number;
@@ -1215,6 +1215,41 @@ export class LoroWebsocketClient {
     );
   }
 
+  /**
+   * Send additional updates to a specified room.
+   *
+   * This method allows sending updates that are not from the local peer's document,
+   * such as updates received from other sources or peers. The updates will be
+   * broadcast to the room and other connected clients.
+   *
+   * @param crdt - The CRDT type of the room
+   * @param roomId - The room ID to send updates to
+   * @param updates - Array of update payloads to send
+   * @throws Error if not connected or room is not active
+   */
+  sendExternalUpdates(
+    crdt: CrdtType,
+    roomId: string,
+    updates: Uint8Array[]
+  ): void {
+    const id = crdt + roomId;
+    const active = this.activeRooms.get(id);
+    if (!active) {
+      throw new Error(
+        `Cannot send updates: room ${roomId} (${crdt}) is not active`
+      );
+    }
+
+    if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
+      throw new Error("Cannot send updates: WebSocket is not open");
+    }
+
+    // Send each update individually, fragmenting when necessary
+    for (const update of updates) {
+      this.sendUpdateOrFragments(crdt, roomId, update);
+    }
+  }
+
   consumeSentBatch(refId: HexString): { roomKey: string; updates: Uint8Array[] } | undefined {
     const entry = this.sentUpdateBatches.get(refId);
     if (entry) {
@@ -1698,7 +1733,7 @@ function isPositive(v: unknown): v is number {
   return typeof v === "number" && isFinite(v) && v > 0;
 }
 
-// Use default 30s unless disabled
+// Use default 20s unless disabled
 function getPingIntervalMs(opts: {
   pingIntervalMs?: number;
   disablePing?: boolean;
@@ -1706,7 +1741,7 @@ function getPingIntervalMs(opts: {
   if (opts.disablePing) return undefined;
   const v = opts.pingIntervalMs;
   if (isPositive(v)) return v;
-  return 30_000;
+  return 20_000;
 }
 
 function createLoroWebsocketClientRoom(opts: {

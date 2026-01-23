@@ -1,6 +1,6 @@
 {
   "name": "loro-adaptors",
-  "version": "0.6.0",
+  "version": "0.6.1",
   "author": "Loro Team",
   "main": "dist/index.js",
   "type": "module",
@@ -15,7 +15,7 @@
     "loro-protocol": "workspace:*"
   },
   "peerDependencies": {
-    "@loro-dev/flock": "^4.0.0",
+    "@loro-dev/flock": "^4.1.0",
     "loro-crdt": "^1.9.0",
     "yjs": "*"
   },

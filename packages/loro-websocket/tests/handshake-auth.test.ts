@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeAll, afterAll } from "vitest";
+import { describe, it, beforeAll, afterAll } from "vitest";
 import { WebSocket } from "ws";
 import getPort from "get-port";
 import { SimpleServer } from "../src/server/simple-server";
@@ -38,8 +38,12 @@ describe("Handshake Auth", () => {
     });
 
     await new Promise<void>((resolve, reject) => {
-      ws.onopen = () => resolve();
-      ws.onerror = err => reject(err);
+      ws.addEventListener("open", () => {
+        resolve();
+      });
+      ws.addEventListener("error", err => {
+        reject(err);
+      });
     });
     ws.close();
   });
@@ -52,10 +56,12 @@ describe("Handshake Auth", () => {
     });
 
     await new Promise<void>((resolve, reject) => {
-      ws.onopen = () => reject(new Error("Should have failed"));
-      ws.onerror = err => {
+      ws.addEventListener("open", () => {
+        reject(new Error("Should have failed"));
+      });
+      ws.addEventListener("error", () => {
         resolve();
-      };
+      });
     });
   });
 
@@ -63,8 +69,12 @@ describe("Handshake Auth", () => {
     const ws = new WebSocket(`ws://localhost:${port}`);
 
     await new Promise<void>((resolve, reject) => {
-      ws.onopen = () => reject(new Error("Should have failed"));
-      ws.onerror = () => resolve();
+      ws.addEventListener("open", () => {
+        reject(new Error("Should have failed"));
+      });
+      ws.addEventListener("error", () => {
+        resolve();
+      });
     });
   });
 });

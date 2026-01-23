@@ -52,9 +52,7 @@ export interface SimpleServerConfig {
    * Optional handshake auth: called during WS HTTP upgrade.
    * Return true to accept, false to reject.
    */
-  handshakeAuth?: (
-    req: IncomingMessage
-  ) => boolean | Promise<boolean>;
+  handshakeAuth?: (req: IncomingMessage) => boolean | Promise<boolean>;
 }
 
 interface RoomDocument {
@@ -94,7 +92,14 @@ export class SimpleServer {
 
   start(): Promise<void> {
     return new Promise(resolve => {
-      const options: { port: number; host?: string; verifyClient?: any } = {
+      const options: {
+        port: number;
+        host?: string;
+        verifyClient?: (
+          info: { origin: string; secure: boolean; req: IncomingMessage },
+          cb: (res: boolean, code?: number, message?: string) => void
+        ) => void;
+      } = {
         port: this.config.port,
       };
       if (this.config.host) {
@@ -184,7 +189,7 @@ export class SimpleServer {
         );
 
         void closers
-          .catch(() => { })
+          .catch(() => {})
           .finally(() => {
             try {
               wss.close(() => {
@@ -205,16 +210,16 @@ export class SimpleServer {
   private async gracefulCloseWebSocket(ws: WebSocket): Promise<void> {
     try {
       await this.waitForSocketDrain(ws);
-    } catch { }
+    } catch {}
 
     try {
       ws.close(1001, "Server stopping");
-    } catch { }
+    } catch {}
 
     setTimeout(() => {
       try {
         if (ws.readyState !== WebSocket.CLOSED) ws.terminate();
-      } catch { }
+      } catch {}
     }, 50);
   }
 
@@ -236,7 +241,11 @@ export class SimpleServer {
         }
 
         const buffered = readBufferedAmount();
-        if (buffered == null || buffered <= 0 || Date.now() - start >= timeoutMs) {
+        if (
+          buffered == null ||
+          buffered <= 0 ||
+          Date.now() - start >= timeoutMs
+        ) {
           resolve();
           return;
         }
@@ -339,7 +348,7 @@ export class SimpleServer {
 
       const joinResult = roomDoc.descriptor.adaptor.handleJoinRequest(
         roomDoc.data,
-        message.version,
+        message.version
       );
 
       // Send join response with current document version
@@ -361,8 +370,7 @@ export class SimpleServer {
         client
       );
       const shouldBackfill =
-        (hasOthers ||
-          roomDoc.descriptor.allowBackfillWhenNoOtherClients) &&
+        (hasOthers || roomDoc.descriptor.allowBackfillWhenNoOtherClients) &&
         joinResult.updates &&
         joinResult.updates.length;
 
@@ -399,7 +407,7 @@ export class SimpleServer {
           message.batchId,
           UpdateStatusCode.PayloadTooLarge,
           message.crdt,
-          message.roomId,
+          message.roomId
         );
         return;
       }
@@ -413,7 +421,7 @@ export class SimpleServer {
           message.batchId,
           UpdateStatusCode.PermissionDenied,
           message.crdt,
-          message.roomId,
+          message.roomId
         );
         client.fragments.delete(message.batchId);
         return;
@@ -428,7 +436,7 @@ export class SimpleServer {
           message.batchId,
           UpdateStatusCode.PermissionDenied,
           message.crdt,
-          message.roomId,
+          message.roomId
         );
         return;
       }
@@ -441,7 +449,7 @@ export class SimpleServer {
       try {
         const newDocumentData = roomDoc.descriptor.adaptor.applyUpdates(
           roomDoc.data,
-          message.updates,
+          message.updates
         );
         roomDoc.data = newDocumentData;
       } catch (error) {
@@ -451,11 +459,10 @@ export class SimpleServer {
           message.batchId,
           UpdateStatusCode.InvalidUpdate,
           message.crdt,
-          message.roomId,
+          message.roomId
         );
         return;
       }
-
 
       if (roomDoc.descriptor.shouldPersist) {
         roomDoc.dirty = true;
@@ -468,7 +475,7 @@ export class SimpleServer {
         message.batchId,
         UpdateStatusCode.Ok,
         message.crdt,
-        message.roomId,
+        message.roomId
       );
 
       if (updatesForBroadcast.length > 0) {
@@ -479,12 +486,7 @@ export class SimpleServer {
           updates: updatesForBroadcast,
           batchId: message.batchId,
         };
-        this.broadcastToRoom(
-          message.roomId,
-          message.crdt,
-          outgoing,
-          client
-        );
+        this.broadcastToRoom(message.roomId, message.crdt, outgoing, client);
       }
     } catch (error) {
       console.error(error);
@@ -493,7 +495,7 @@ export class SimpleServer {
         message.batchId,
         UpdateStatusCode.Unknown,
         message.crdt,
-        message.roomId,
+        message.roomId
       );
     }
   }
@@ -511,13 +513,16 @@ export class SimpleServer {
         message.batchId,
         UpdateStatusCode.PermissionDenied,
         message.crdt,
-        message.roomId,
+        message.roomId
       );
       return;
     }
 
     const batch = {
-      data: Array.from({ length: message.fragmentCount }, () => new Uint8Array()),
+      data: Array.from(
+        { length: message.fragmentCount },
+        () => new Uint8Array()
+      ),
       totalSize: message.totalSizeBytes,
       received: 0,
       header: message,
@@ -531,7 +536,7 @@ export class SimpleServer {
         message.batchId,
         UpdateStatusCode.FragmentTimeout,
         message.crdt,
-        message.roomId,
+        message.roomId
       );
     }, 10000);
 
@@ -549,7 +554,7 @@ export class SimpleServer {
         message.batchId,
         UpdateStatusCode.FragmentTimeout,
         message.crdt,
-        message.roomId,
+        message.roomId
       );
       return;
     }
@@ -579,7 +584,7 @@ export class SimpleServer {
           message.batchId,
           UpdateStatusCode.PermissionDenied,
           message.crdt,
-          message.roomId,
+          message.roomId
         );
         return;
       }
@@ -591,7 +596,7 @@ export class SimpleServer {
           message.batchId,
           UpdateStatusCode.PermissionDenied,
           message.crdt,
-          message.roomId,
+          message.roomId
         );
         client.fragments.delete(message.batchId);
         return;
@@ -605,7 +610,7 @@ export class SimpleServer {
       try {
         const newDocumentData = roomDoc.descriptor.adaptor.applyUpdates(
           roomDoc.data,
-          [totalData],
+          [totalData]
         );
         roomDoc.data = newDocumentData;
       } catch (error) {
@@ -615,7 +620,7 @@ export class SimpleServer {
           message.batchId,
           UpdateStatusCode.InvalidUpdate,
           message.crdt,
-          message.roomId,
+          message.roomId
         );
         client.fragments.delete(message.batchId);
         return;
@@ -630,7 +635,7 @@ export class SimpleServer {
         message.batchId,
         UpdateStatusCode.Ok,
         message.crdt,
-        message.roomId,
+        message.roomId
       );
 
       // Broadcast original fragments to other clients in the room
@@ -688,10 +693,7 @@ export class SimpleServer {
 
     if (descriptor.shouldPersist && this.config.onLoadDocument) {
       try {
-        const loaded = await this.config.onLoadDocument(
-          roomId,
-          crdtType
-        );
+        const loaded = await this.config.onLoadDocument(roomId, crdtType);
         if (loaded) {
           data = loaded;
         }
@@ -792,9 +794,10 @@ export class SimpleServer {
     return `${roomId}:${crdtType}`;
   }
 
-  private parseRoomKey(
-    roomKey: string
-  ): { roomId: string; crdtType: CrdtType } {
+  private parseRoomKey(roomKey: string): {
+    roomId: string;
+    crdtType: CrdtType;
+  } {
     const sep = roomKey.lastIndexOf(":");
     if (sep === -1) {
       return { roomId: roomKey, crdtType: CrdtType.Loro };

@@ -197,7 +197,7 @@ Adaptors bridge the client to actual CRDT state:
 ```ts
 new LoroWebsocketClient({
   url: string,                 // Required ws:// or wss:// endpoint.
-  pingIntervalMs?: number,     // Default 30_000 ms.
+  pingIntervalMs?: number,     // Default 20_000 ms.
   disablePing?: boolean,       // Skip periodic ping/pong entirely.
   onWsClose?: () => void,      // Invoked on low-level close before status change.
 });
