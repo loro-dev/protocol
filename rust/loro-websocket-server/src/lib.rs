@@ -1036,33 +1036,6 @@ where
 /// This allows you to share the registry with other parts of your application,
 /// for example to expose HTTP endpoints that query the registry state.
 /// 
-/// # Example
-/// ```no_run
-/// # fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-/// #   let rt = tokio::runtime::Builder::new_current_thread().enable_all().build()?;
-/// #   rt.block_on(async move {
-/// use std::sync::Arc;
-/// use loro_websocket_server::{HubRegistry, ServerConfig, serve_incoming_with_registry};
-/// use tokio::net::TcpListener;
-/// 
-/// let config = ServerConfig::<()>::default();
-/// let registry = Arc::new(HubRegistry::new(config));
-/// 
-/// // Clone registry for use in HTTP endpoints
-/// let registry_for_http = registry.clone();
-/// 
-/// // Spawn HTTP server that uses registry_for_http
-/// tokio::spawn(async move {
-///     // Your HTTP server code here, e.g.:
-///     // let workspaces = registry_for_http.list_workspaces().await;
-/// });
-/// 
-/// // Start WebSocket server
-/// let listener = TcpListener::bind("127.0.0.1:9000").await?;
-/// serve_incoming_with_registry(listener, registry).await
-/// #   })
-/// # }
-/// ```
 pub async fn serve_incoming_with_registry<DocCtx>(
     listener: TcpListener,
     registry: Arc<HubRegistry<DocCtx>>,
