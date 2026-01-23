@@ -858,7 +858,31 @@ fn send_ack(
     }
 }
 
-struct HubRegistry<DocCtx> {
+/// Information about a room's current state.
+#[derive(Clone, Debug)]
+pub struct RoomInfo {
+    /// The CRDT type of the room.
+    pub crdt: CrdtType,
+    /// The room identifier.
+    pub room_id: String,
+    /// Number of connected subscribers.
+    pub subscriber_count: usize,
+}
+
+/// Information about a workspace's current state.
+#[derive(Clone, Debug)]
+pub struct WorkspaceInfo {
+    /// The workspace identifier.
+    pub workspace_id: String,
+    /// Information about each active room.
+    pub rooms: Vec<RoomInfo>,
+}
+
+/// Registry that manages all workspace hubs.
+/// 
+/// This can be shared between your WebSocket server and HTTP endpoints
+/// to expose information about connected clients and rooms.
+pub struct HubRegistry<DocCtx> {
     config: ServerConfig<DocCtx>,
     hubs: tokio::sync::Mutex<HashMap<String, Arc<tokio::sync::Mutex<Hub<DocCtx>>>>>,
 }
@@ -867,11 +891,61 @@ impl<DocCtx> HubRegistry<DocCtx>
 where
     DocCtx: Clone + Send + Sync + 'static,
 {
-    fn new(config: ServerConfig<DocCtx>) -> Self {
+    /// Create a new hub registry with the given configuration.
+    pub fn new(config: ServerConfig<DocCtx>) -> Self {
         Self {
             config,
             hubs: tokio::sync::Mutex::new(HashMap::new()),
         }
+    }
+
+    /// List all active workspace IDs.
+    pub async fn list_workspaces(&self) -> Vec<String> {
+        let map = self.hubs.lock().await;
+        map.keys().cloned().collect()
+    }
+
+    /// Get information about a specific workspace.
+    pub async fn get_workspace_info(&self, workspace: &str) -> Option<WorkspaceInfo> {
+        let map = self.hubs.lock().await;
+        let hub = map.get(workspace)?;
+        let h = hub.lock().await;
+        let rooms = h
+            .subs
+            .iter()
+            .map(|(k, subs)| RoomInfo {
+                crdt: k.crdt,
+                room_id: k.room.clone(),
+                subscriber_count: subs.len(),
+            })
+            .collect();
+        Some(WorkspaceInfo {
+            workspace_id: workspace.to_string(),
+            rooms,
+        })
+    }
+
+    /// Get information about all workspaces.
+    pub async fn get_all_workspace_info(&self) -> Vec<WorkspaceInfo> {
+        let map = self.hubs.lock().await;
+        let mut result = Vec::with_capacity(map.len());
+        for (workspace_id, hub) in map.iter() {
+            let h = hub.lock().await;
+            let rooms = h
+                .subs
+                .iter()
+                .map(|(k, subs)| RoomInfo {
+                    crdt: k.crdt,
+                    room_id: k.room.clone(),
+                    subscriber_count: subs.len(),
+                })
+                .collect();
+            result.push(WorkspaceInfo {
+                workspace_id: workspace_id.clone(),
+                rooms,
+            });
+        }
+        result
     }
 
     async fn get_or_create(&self, workspace: &str) -> Arc<tokio::sync::Mutex<Hub<DocCtx>>> {
@@ -953,8 +1027,49 @@ pub async fn serve_incoming_with_config<DocCtx>(
 where
     DocCtx: Clone + Send + Sync + 'static,
 {
-    let registry = Arc::new(HubRegistry::new(config.clone()));
+    let registry = Arc::new(HubRegistry::new(config));
+    serve_incoming_with_registry(listener, registry).await
+}
 
+/// Serve a pre-bound listener using an existing registry.
+/// 
+/// This allows you to share the registry with other parts of your application,
+/// for example to expose HTTP endpoints that query the registry state.
+/// 
+/// # Example
+/// ```no_run
+/// # fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+/// #   let rt = tokio::runtime::Builder::new_current_thread().enable_all().build()?;
+/// #   rt.block_on(async move {
+/// use std::sync::Arc;
+/// use loro_websocket_server::{HubRegistry, ServerConfig, serve_incoming_with_registry};
+/// use tokio::net::TcpListener;
+/// 
+/// let config = ServerConfig::<()>::default();
+/// let registry = Arc::new(HubRegistry::new(config));
+/// 
+/// // Clone registry for use in HTTP endpoints
+/// let registry_for_http = registry.clone();
+/// 
+/// // Spawn HTTP server that uses registry_for_http
+/// tokio::spawn(async move {
+///     // Your HTTP server code here, e.g.:
+///     // let workspaces = registry_for_http.list_workspaces().await;
+/// });
+/// 
+/// // Start WebSocket server
+/// let listener = TcpListener::bind("127.0.0.1:9000").await?;
+/// serve_incoming_with_registry(listener, registry).await
+/// #   })
+/// # }
+/// ```
+pub async fn serve_incoming_with_registry<DocCtx>(
+    listener: TcpListener,
+    registry: Arc<HubRegistry<DocCtx>>,
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>>
+where
+    DocCtx: Clone + Send + Sync + 'static,
+{
     loop {
         match listener.accept().await {
             Ok((stream, peer)) => {
