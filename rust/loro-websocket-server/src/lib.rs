@@ -52,10 +52,13 @@ use tracing::{debug, error, info, warn};
 const MAX_FRAGMENTS: u64 = 4096; // hard cap on number of fragments per batch
 const MAX_BATCH_BYTES: u64 = 64 * 1024 * 1024; // 64 MiB per batch
 
+/// Key identifying a room by its CRDT type and room ID.
 #[derive(Clone, Debug, PartialEq, Eq)]
-struct RoomKey {
-    crdt: CrdtType,
-    room: String,
+pub struct RoomKey {
+    /// The CRDT type of the room.
+    pub crdt: CrdtType,
+    /// The room identifier.
+    pub room: String,
 }
 impl Hash for RoomKey {
     fn hash<H: Hasher>(&self, state: &mut H) {
@@ -183,8 +186,12 @@ pub struct ServerConfig<DocCtx = ()> {
     pub on_close_connection: Option<CloseConnectionFn>,
 }
 
-// CRDT document abstraction to reduce match-based branching
-trait CrdtDoc: Send {
+/// CRDT document abstraction to reduce match-based branching.
+/// 
+/// This trait is implemented by different document types (Loro, Ephemeral, Elo).
+/// You can use it to query document state through the `RoomDocState.doc` field.
+pub trait CrdtDoc: Send {
+    /// Get the current version vector as bytes.
     fn get_version(&self) -> Vec<u8> {
         Vec::new()
     }
@@ -515,21 +522,27 @@ impl<DocCtx> Default for ServerConfig<DocCtx> {
     }
 }
 
-struct RoomDocState<DocCtx> {
-    doc: Box<dyn CrdtDoc>,
-    dirty: bool,
-    ctx: Option<DocCtx>,
+/// State of a document in a room.
+pub struct RoomDocState<DocCtx> {
+    /// The underlying CRDT document (trait object).
+    pub doc: Box<dyn CrdtDoc>,
+    /// Whether the document has unsaved changes.
+    pub dirty: bool,
+    /// Optional application-specific context.
+    pub ctx: Option<DocCtx>,
 }
 
-struct Hub<DocCtx> {
-    // room -> vec of (conn_id, sender)
-    subs: HashMap<RoomKey, Vec<(u64, Sender)>>,
-    // room -> document state (Loro persistent, Ephemeral in-memory, Elo index)
-    docs: HashMap<RoomKey, RoomDocState<DocCtx>>,
+/// A hub managing subscriptions and documents for a single workspace.
+pub struct Hub<DocCtx> {
+    /// Room -> vec of (conn_id, sender). Use this to inspect connected clients per room.
+    pub subs: HashMap<RoomKey, Vec<(u64, Sender)>>,
+    /// Room -> document state. Use this to inspect loaded documents.
+    pub docs: HashMap<RoomKey, RoomDocState<DocCtx>>,
     config: ServerConfig<DocCtx>,
-    // (conn_id, room) -> permission
-    perms: HashMap<(u64, RoomKey), Permission>,
-    workspace: String,
+    /// (conn_id, room) -> permission. Use this to inspect client permissions.
+    pub perms: HashMap<(u64, RoomKey), Permission>,
+    /// The workspace identifier.
+    pub workspace: String,
     // Fragment reassembly state: per room + batch id
     fragments: HashMap<(RoomKey, protocol::BatchId), FragmentBatch>,
 }
@@ -738,6 +751,94 @@ where
         }
     }
 
+    /// Apply updates to a room's document and broadcast to all subscribers.
+    /// 
+    /// This is useful for server-initiated updates (e.g., from HTTP endpoints).
+    /// Calls the `on_update` hook if configured, and respects its result.
+    /// Returns the number of subscribers the update was sent to, or an error.
+    /// 
+    /// # Example
+    /// ```ignore
+    /// let hubs = registry.hubs().lock().await;
+    /// if let Some(hub) = hubs.get("my-workspace") {
+    ///     let mut h = hub.lock().await;
+    ///     let room = RoomKey { crdt: CrdtType::Loro, room: "my-room".into() };
+    ///     match h.push_update(&room, vec![update_bytes]).await {
+    ///         Ok(n) => println!("Broadcasted to {} subscribers", n),
+    ///         Err(e) => eprintln!("Failed: {}", e),
+    ///     }
+    /// }
+    /// ```
+    pub async fn push_update(&mut self, room: &RoomKey, updates: Vec<Vec<u8>>) -> Result<usize, String> {
+        // Check room exists
+        if !self.docs.contains_key(room) {
+            return Err("room not found".into());
+        }
+
+        // Call on_update hook if configured
+        let mut skip_apply = false;
+        if let Some(update_hook) = self.config.on_update.clone() {
+            let ctx = self.docs.get(room).and_then(|s| s.ctx.clone());
+            let doc = self.docs.get(room).and_then(|s| s.doc.get_loro_doc());
+            let args = UpdateArgs {
+                workspace: self.workspace.clone(),
+                room: room.room.clone(),
+                crdt: room.crdt,
+                conn_id: 0, // Server-initiated, no connection
+                updates: updates.clone(),
+                doc,
+                ctx,
+            };
+            let mut result = (update_hook)(args).await;
+            
+            if result.status != UpdateStatusCode::Ok {
+                return Err(format!("on_update hook rejected: {:?}", result.status));
+            }
+            
+            skip_apply = self.process_update_hook_result(room, &mut result);
+        }
+
+        // Apply to doc (unless hook already did)
+        if !skip_apply {
+            if let Some(state) = self.docs.get_mut(room) {
+                state.doc.apply_updates(&updates)?;
+                if state.doc.should_persist() {
+                    state.dirty = true;
+                }
+            }
+        }
+
+        // Broadcast to all subscribers
+        let batch_id = next_batch_id();
+        let msg = ProtocolMessage::DocUpdate {
+            crdt: room.crdt,
+            room_id: room.room.clone(),
+            updates,
+            batch_id,
+        };
+        let encoded = match loro_protocol::encode(&msg) {
+            Ok(b) => b,
+            Err(e) => return Err(format!("encode failed: {:?}", e)),
+        };
+
+        let mut sent = 0usize;
+        if let Some(list) = self.subs.get_mut(room) {
+            let mut dead: HashSet<u64> = HashSet::new();
+            for (id, tx) in list.iter() {
+                if tx.send(Message::Binary(encoded.clone().into())).is_err() {
+                    dead.insert(*id);
+                } else {
+                    sent += 1;
+                }
+            }
+            if !dead.is_empty() {
+                list.retain(|(id, _)| !dead.contains(id));
+            }
+        }
+
+        Ok(sent)
+    }
+
     fn process_update_hook_result(
         &mut self,
         room: &RoomKey,
@@ -858,26 +959,6 @@ fn send_ack(
     }
 }
 
-/// Information about a room's current state.
-#[derive(Clone, Debug)]
-pub struct RoomInfo {
-    /// The CRDT type of the room.
-    pub crdt: CrdtType,
-    /// The room identifier.
-    pub room_id: String,
-    /// Number of connected subscribers.
-    pub subscriber_count: usize,
-}
-
-/// Information about a workspace's current state.
-#[derive(Clone, Debug)]
-pub struct WorkspaceInfo {
-    /// The workspace identifier.
-    pub workspace_id: String,
-    /// Information about each active room.
-    pub rooms: Vec<RoomInfo>,
-}
-
 /// Registry that manages all workspace hubs.
 /// 
 /// This can be shared between your WebSocket server and HTTP endpoints
@@ -899,53 +980,23 @@ where
         }
     }
 
-    /// List all active workspace IDs.
-    pub async fn list_workspaces(&self) -> Vec<String> {
-        let map = self.hubs.lock().await;
-        map.keys().cloned().collect()
-    }
-
-    /// Get information about a specific workspace.
-    pub async fn get_workspace_info(&self, workspace: &str) -> Option<WorkspaceInfo> {
-        let map = self.hubs.lock().await;
-        let hub = map.get(workspace)?;
-        let h = hub.lock().await;
-        let rooms = h
-            .subs
-            .iter()
-            .map(|(k, subs)| RoomInfo {
-                crdt: k.crdt,
-                room_id: k.room.clone(),
-                subscriber_count: subs.len(),
-            })
-            .collect();
-        Some(WorkspaceInfo {
-            workspace_id: workspace.to_string(),
-            rooms,
-        })
-    }
-
-    /// Get information about all workspaces.
-    pub async fn get_all_workspace_info(&self) -> Vec<WorkspaceInfo> {
-        let map = self.hubs.lock().await;
-        let mut result = Vec::with_capacity(map.len());
-        for (workspace_id, hub) in map.iter() {
-            let h = hub.lock().await;
-            let rooms = h
-                .subs
-                .iter()
-                .map(|(k, subs)| RoomInfo {
-                    crdt: k.crdt,
-                    room_id: k.room.clone(),
-                    subscriber_count: subs.len(),
-                })
-                .collect();
-            result.push(WorkspaceInfo {
-                workspace_id: workspace_id.clone(),
-                rooms,
-            });
-        }
-        result
+    /// Access the underlying hubs map.
+    /// 
+    /// Returns a reference to the mutex-protected map of workspace ID -> Hub.
+    /// Use this to implement your own inspection logic in HTTP endpoints.
+    /// 
+    /// # Example
+    /// ```ignore
+    /// let hubs = registry.hubs().lock().await;
+    /// for (workspace_id, hub) in hubs.iter() {
+    ///     let h = hub.lock().await;
+    ///     for (room_key, subscribers) in h.subs.iter() {
+    ///         println!("Room {} has {} subscribers", room_key.room, subscribers.len());
+    ///     }
+    /// }
+    /// ```
+    pub fn hubs(&self) -> &tokio::sync::Mutex<HashMap<String, Arc<tokio::sync::Mutex<Hub<DocCtx>>>>> {
+        &self.hubs
     }
 
     async fn get_or_create(&self, workspace: &str) -> Arc<tokio::sync::Mutex<Hub<DocCtx>>> {
