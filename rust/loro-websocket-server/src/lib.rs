@@ -44,7 +44,7 @@ use loro::awareness::EphemeralStore;
 use loro::{ExportMode, LoroDoc};
 pub use loro_protocol as protocol;
 use protocol::{
-    try_decode, CrdtType, JoinErrorCode, Permission, ProtocolMessage, UpdateStatusCode,
+    try_decode, CrdtType, JoinErrorCode, Permission, ProtocolMessage, RoomErrorCode, UpdateStatusCode,
 };
 use tracing::{debug, error, info, warn};
 
@@ -997,6 +997,249 @@ where
     /// ```
     pub fn hubs(&self) -> &tokio::sync::Mutex<HashMap<String, Arc<tokio::sync::Mutex<Hub<DocCtx>>>>> {
         &self.hubs
+    }
+
+    /// Open a room, creating the hub and loading the document if needed.
+    /// 
+    /// This is idempotent - if the room already exists, nothing happens.
+    /// Useful for pre-creating rooms before any WebSocket clients connect.
+    /// 
+    /// # Example
+    /// ```ignore
+    /// // Pre-create a room so it's ready when clients connect
+    /// registry.open_room("my-workspace", CrdtType::Loro, "my-room").await;
+    /// ```
+    pub async fn open_room(&self, workspace: &str, crdt: CrdtType, room_id: &str) {
+        let hub = self.get_or_create(workspace).await;
+        let mut h = hub.lock().await;
+        let room = RoomKey {
+            crdt,
+            room: room_id.to_string(),
+        };
+        h.ensure_room_loaded(&room).await;
+    }
+
+    /// Close a room if it has no subscribers (or forcefully).
+    /// 
+    /// Returns `true` if the room was closed, `false` if it has active subscribers
+    /// (when `force` is false) or didn't exist. Saves dirty documents before closing
+    /// if `on_save_document` is configured.
+    /// 
+    /// When `force` is true, the room is closed even if there are active subscribers.
+    /// Their sender channels will be dropped (they won't receive further updates).
+    /// 
+    /// # Example
+    /// ```ignore
+    /// // Close only if no subscribers
+    /// if registry.close_room("my-workspace", CrdtType::Loro, "my-room", false).await {
+    ///     println!("Room closed");
+    /// }
+    /// 
+    /// // Force close regardless of subscribers
+    /// registry.close_room("my-workspace", CrdtType::Loro, "my-room", true).await;
+    /// ```
+    pub async fn close_room(&self, workspace: &str, crdt: CrdtType, room_id: &str, force: bool) -> bool {
+        let hubs = self.hubs.lock().await;
+        let Some(hub) = hubs.get(workspace) else {
+            return false;
+        };
+        let mut h = hub.lock().await;
+        let room = RoomKey {
+            crdt,
+            room: room_id.to_string(),
+        };
+        
+        // Check if room has subscribers (unless forcing)
+        if !force {
+            if let Some(subs) = h.subs.get(&room) {
+                if !subs.is_empty() {
+                    return false;
+                }
+            }
+        }
+
+        // Notify subscribers before closing
+        if let Some(subs) = h.subs.get(&room) {
+            if !subs.is_empty() {
+                let err_msg = ProtocolMessage::RoomError {
+                    crdt,
+                    room_id: room_id.to_string(),
+                    code: RoomErrorCode::Evicted,
+                    message: "Room closed by server".to_string(),
+                };
+                if let Ok(bytes) = loro_protocol::encode(&err_msg) {
+                    for (_, tx) in subs.iter() {
+                        let _ = tx.send(Message::Binary(bytes.clone().into()));
+                    }
+                }
+            }
+        }
+
+        // Save dirty document before closing if on_save_document is configured
+        if let Some(saver) = &self.config.on_save_document {
+            if let Some(state) = h.docs.get_mut(&room) {
+                if state.dirty && state.doc.should_persist() {
+                    if let Some(snapshot) = state.doc.export_snapshot() {
+                        let args = SaveDocArgs {
+                            workspace: workspace.to_string(),
+                            room: room_id.to_string(),
+                            crdt,
+                            data: snapshot,
+                            ctx: state.ctx.clone(),
+                        };
+                        match (saver)(args).await {
+                            Ok(()) => {
+                                state.dirty = false;
+                                debug!(workspace=%workspace, room=%room_id, "saved room before closing");
+                            }
+                            Err(e) => {
+                                warn!(workspace=%workspace, room=%room_id, %e, "failed to save room before closing");
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        
+        // Remove room state
+        h.docs.remove(&room);
+        h.subs.remove(&room);
+        h.perms.retain(|(_, k), _| k != &room);
+        h.fragments.retain(|(k, _), _| k != &room);
+        true
+    }
+
+    /// Save a room's document if it has unsaved changes.
+    /// 
+    /// Returns `Ok(true)` if the document was saved, `Ok(false)` if there was
+    /// nothing to save (not dirty or doesn't support persistence), or an error
+    /// if saving failed or `on_save_document` is not configured.
+    /// 
+    /// # Example
+    /// ```ignore
+    /// match registry.save_room("my-workspace", CrdtType::Loro, "my-room").await {
+    ///     Ok(true) => println!("Saved"),
+    ///     Ok(false) => println!("Nothing to save"),
+    ///     Err(e) => eprintln!("Save failed: {}", e),
+    /// }
+    /// ```
+    pub async fn save_room(&self, workspace: &str, crdt: CrdtType, room_id: &str) -> Result<bool, String> {
+        let Some(saver) = &self.config.on_save_document else {
+            return Err("on_save_document not configured".into());
+        };
+        
+        let hubs = self.hubs.lock().await;
+        let Some(hub) = hubs.get(workspace) else {
+            return Err("workspace not found".into());
+        };
+        let mut h = hub.lock().await;
+        let room = RoomKey {
+            crdt,
+            room: room_id.to_string(),
+        };
+        
+        let Some(state) = h.docs.get_mut(&room) else {
+            return Err("room not found".into());
+        };
+        
+        if !state.dirty || !state.doc.should_persist() {
+            return Ok(false);
+        }
+        
+        let Some(snapshot) = state.doc.export_snapshot() else {
+            return Ok(false);
+        };
+        
+        let args = SaveDocArgs {
+            workspace: workspace.to_string(),
+            room: room_id.to_string(),
+            crdt,
+            data: snapshot,
+            ctx: state.ctx.clone(),
+        };
+        
+        (saver)(args).await.map_err(|e| e)?;
+        state.dirty = false;
+        debug!(workspace=%workspace, room=%room_id, "room saved");
+        Ok(true)
+    }
+
+    /// Close a hub (workspace) if all its rooms have no subscribers (or forcefully).
+    /// 
+    /// Returns `true` if the hub was closed, `false` if any room has active
+    /// subscribers (when `force` is false). Saves all dirty rooms before closing
+    /// if `on_save_document` is configured.
+    /// 
+    /// When `force` is true, the hub is closed even if rooms have active subscribers.
+    /// Their sender channels will be dropped (they won't receive further updates).
+    /// 
+    /// Note: The hub's saver task will stop when the hub is dropped (after
+    /// all Arc references are released).
+    pub async fn close_hub(&self, workspace: &str, force: bool) -> bool {
+        let mut hubs = self.hubs.lock().await;
+        let Some(hub) = hubs.get(workspace) else {
+            return false;
+        };
+        
+        let mut h = hub.lock().await;
+        // Check if any room has subscribers (unless forcing)
+        if !force {
+            for subs in h.subs.values() {
+                if !subs.is_empty() {
+                    return false;
+                }
+            }
+        }
+
+        // Notify all subscribers in all rooms before closing
+        for (room, subs) in h.subs.iter() {
+            if !subs.is_empty() {
+                let err_msg = ProtocolMessage::RoomError {
+                    crdt: room.crdt,
+                    room_id: room.room.clone(),
+                    code: RoomErrorCode::Evicted,
+                    message: "Hub closed by server".to_string(),
+                };
+                if let Ok(bytes) = loro_protocol::encode(&err_msg) {
+                    for (_, tx) in subs.iter() {
+                        let _ = tx.send(Message::Binary(bytes.clone().into()));
+                    }
+                }
+            }
+        }
+
+        // Save all dirty rooms before closing if on_save_document is configured
+        if let Some(saver) = &self.config.on_save_document {
+            let rooms: Vec<RoomKey> = h.docs.keys().cloned().collect();
+            for room in rooms {
+                if let Some(state) = h.docs.get_mut(&room) {
+                    if state.dirty && state.doc.should_persist() {
+                        if let Some(snapshot) = state.doc.export_snapshot() {
+                            let args = SaveDocArgs {
+                                workspace: workspace.to_string(),
+                                room: room.room.clone(),
+                                crdt: room.crdt,
+                                data: snapshot,
+                                ctx: state.ctx.clone(),
+                            };
+                            match (saver)(args).await {
+                                Ok(()) => {
+                                    state.dirty = false;
+                                    debug!(workspace=%workspace, room=%room.room, "saved room before closing hub");
+                                }
+                                Err(e) => {
+                                    warn!(workspace=%workspace, room=%room.room, %e, "failed to save room before closing hub");
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        drop(h);
+        
+        hubs.remove(workspace);
+        true
     }
 
     async fn get_or_create(&self, workspace: &str) -> Arc<tokio::sync::Mutex<Hub<DocCtx>>> {
