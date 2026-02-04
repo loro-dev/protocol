@@ -717,8 +717,8 @@ export class LoroWebsocketClient {
           void this.sendRejoinRequest(roomId, msg.roomId, adaptor, active.room, auth);
         } else {
           // Remove local room state so client does not auto-retry unless requested
-          this.cleanupRoom(msg.roomId, msg.crdt);
           this.emitRoomStatus(roomId, RoomJoinStatus.Error);
+          this.cleanupRoom(msg.roomId, msg.crdt);
         }
         break;
       }
