@@ -220,6 +220,9 @@ pub trait CrdtDoc: Send {
     fn set_loro_doc(&mut self, _doc: LoroDoc) -> bool {
         false
     }
+    fn as_loro_doc_mut(&mut self) -> Option<&mut LoroDoc> {
+        None
+    }
 }
 
 struct LoroRoomDoc {
@@ -254,6 +257,9 @@ impl CrdtDoc for LoroRoomDoc {
     fn set_loro_doc(&mut self, doc: LoroDoc) -> bool {
         self.doc = doc;
         true
+    }
+    fn as_loro_doc_mut(&mut self) -> Option<&mut LoroDoc> {
+        Some(&mut self.doc)
     }
 }
 
@@ -1017,6 +1023,96 @@ where
             room: room_id.to_string(),
         };
         h.ensure_room_loaded(&room).await;
+    }
+
+    /// Edit a Loro document directly on the server and notify subscribers.
+    ///
+    /// This method loads the room (if needed), runs the provided callback with a
+    /// reference to the underlying `LoroDoc`, exports a snapshot, and broadcasts
+    /// it to all subscribers. The callback should perform mutations and call
+    /// `commit()` when done so the snapshot captures the new state.
+    ///
+    /// After the edit, if the room has no subscribers, it will be saved (if dirty)
+    /// and closed to avoid leaving orphan rooms. If `force_close` is true, the room
+    /// will be closed even if it has subscribers.
+    pub async fn edit_loro_doc<F>(
+        &self,
+        workspace: &str,
+        room_id: &str,
+        edit: F,
+        force_close: bool,
+    ) -> Result<(), String>
+    where
+        F: FnOnce(&LoroDoc) -> Result<(), String> + Send,
+    {
+        let hub = self.get_or_create(workspace).await;
+        let room = RoomKey {
+            crdt: CrdtType::Loro,
+            room: room_id.to_string(),
+        };
+
+        // Do the work, capturing whether we should close and the result
+        let (result, should_close) = {
+            let mut h = hub.lock().await;
+            h.ensure_room_loaded(&room).await;
+
+            let Some(state) = h.docs.get_mut(&room) else {
+                // Room not found after ensure_room_loaded - shouldn't happen
+                return Err("room not found".into());
+            };
+
+            let edit_result = {
+                let Some(doc) = state.doc.as_loro_doc_mut() else {
+                    return Err("room is not a Loro document".into());
+                };
+                edit(doc)
+            };
+
+            if let Err(e) = edit_result {
+                let has_subs = h.subs.get(&room).map(|v| !v.is_empty()).unwrap_or(false);
+                (Err(e), force_close || !has_subs)
+            } else {
+                let state = h.docs.get_mut(&room).unwrap(); // safe: we just checked above
+                if state.doc.should_persist() {
+                    state.dirty = true;
+                }
+
+                let snapshot = state.doc.export_snapshot();
+                let has_subs = h.subs.get(&room).map(|v| !v.is_empty()).unwrap_or(false);
+
+                if let Some(snap) = snapshot {
+                    if !snap.is_empty() {
+                        let batch_id = next_batch_id();
+                        let msg = ProtocolMessage::DocUpdate {
+                            crdt: CrdtType::Loro,
+                            room_id: room.room.clone(),
+                            updates: vec![snap],
+                            batch_id,
+                        };
+                        match loro_protocol::encode(&msg) {
+                            Ok(encoded) => {
+                                h.broadcast(&room, 0, Message::Binary(encoded.into()));
+                                (Ok(()), force_close || !has_subs)
+                            }
+                            Err(e) => {
+                                (Err(format!("encode failed: {:?}", e)), force_close || !has_subs)
+                            }
+                        }
+                    } else {
+                        (Ok(()), force_close || !has_subs)
+                    }
+                } else {
+                    (Ok(()), force_close || !has_subs)
+                }
+            }
+        };
+
+        // Close room if no subscribers or force_close requested (deferred until lock released)
+        if should_close {
+            self.close_room(workspace, CrdtType::Loro, room_id, force_close).await;
+        }
+
+        result
     }
 
     /// Close a room if it has no subscribers (or forcefully).
