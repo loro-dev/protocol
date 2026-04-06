@@ -1087,7 +1087,7 @@ describe("React strict-mode: join + immediate close", () => {
   }, 15000);
 
   it("close() before auth microtask settles does not resurrect the client", async () => {
-    const statuses: ClientStatus[] = [];
+    const statuses: string[] = [];
     const client = new LoroWebsocketClient({
       url: `ws://localhost:${port}`,
     });
