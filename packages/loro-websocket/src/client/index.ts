@@ -1544,6 +1544,7 @@ export class LoroWebsocketClient {
 
   private sendJoinPayload(payload: Uint8Array) {
     if (this.safeSend(this.ws, payload, "join")) return;
+    if (!this.shouldReconnect) return;
     this.enqueueJoin(payload);
     void this.connect();
   }
