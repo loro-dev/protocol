@@ -717,8 +717,8 @@ export class LoroWebsocketClient {
           void this.sendRejoinRequest(roomId, msg.roomId, adaptor, active.room, auth);
         } else {
           // Remove local room state so client does not auto-retry unless requested
-          this.emitRoomStatus(roomId, RoomJoinStatus.Error);
           this.cleanupRoom(msg.roomId, msg.crdt);
+          this.emitRoomStatus(roomId, RoomJoinStatus.Error);
         }
         break;
       }
@@ -913,7 +913,9 @@ export class LoroWebsocketClient {
     this.roomAdaptors.delete(id);
     this.roomIds.delete(id);
     this.roomAuth.delete(id);
-    this.roomStatusListeners.delete(id);
+    // Status listeners are intentionally kept so any emitRoomStatus call
+    // made immediately after cleanupRoom (e.g. RoomJoinStatus.Error) still
+    // reaches subscribers. They are cleared when the client is destroyed.
   }
 
   waitConnected() {
