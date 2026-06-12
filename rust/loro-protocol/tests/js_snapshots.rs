@@ -24,6 +24,22 @@ fn snapshot_join_request() {
 }
 
 #[test]
+fn snapshot_flock_join_request() {
+    let msg = ProtocolMessage::JoinRequest {
+        crdt: CrdtType::Flock,
+        room_id: "room-1234".to_string(),
+        auth: vec![10, 20, 30],
+        version: vec![40, 50, 60],
+    };
+    let encoded = encode(&msg).unwrap();
+    assert_eq!(
+        to_hex(&encoded),
+        "0x25464c4f09726f6f6d2d3132333400030a141e0328323c"
+    );
+    assert_eq!(decode(&encoded).unwrap(), msg);
+}
+
+#[test]
 fn snapshot_join_response_read() {
     // exports[`encoding snapshots > JoinResponseOk read 1`]
     let msg = ProtocolMessage::JoinResponseOk {

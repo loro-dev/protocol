@@ -28,7 +28,7 @@ jobs:
 
   publish:
     needs: release
-    if: ${{ needs.release.outputs.releases_created }}
+    if: ${{ needs.release.outputs.releases_created == 'true' || github.event_name == 'workflow_dispatch' }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -85,3 +85,34 @@ jobs:
           # Publish only the unpublished ones in topo order
           echo "Publishing: $filters"
           pnpm -r $filters publish --access public --no-git-checks
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Test Rust loro-protocol crate
+        working-directory: rust
+        run: cargo test -p loro-protocol
+
+      - name: Publish Rust loro-protocol crate to crates.io
+        working-directory: rust/loro-protocol
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+        run: |
+          set -euo pipefail
+          name=$(cargo metadata --no-deps --format-version 1 | jq -r '.packages[0].name')
+          version=$(cargo metadata --no-deps --format-version 1 | jq -r '.packages[0].version')
+
+          if curl -fsSL \
+            -H "User-Agent: loro-dev/protocol release workflow" \
+            "https://crates.io/api/v1/crates/$name/$version" > /dev/null; then
+            echo "Already published: $name@$version"
+            exit 0
+          fi
+
+          if [ -z "${CARGO_REGISTRY_TOKEN:-}" ]; then
+            echo "CARGO_REGISTRY_TOKEN is required to publish $name@$version"
+            exit 1
+          fi
+
+          echo "Publishing: $name@$version"
+          cargo publish

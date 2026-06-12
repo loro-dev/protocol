@@ -9,6 +9,10 @@
     "packages/loro-protocol": {
       "release-type": "node"
     },
+    "rust/loro-protocol": {
+      "release-type": "rust",
+      "package-name": "loro-protocol"
+    },
     "packages/loro-websocket": {
       "release-type": "node"
     },

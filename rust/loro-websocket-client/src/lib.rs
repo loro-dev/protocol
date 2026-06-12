@@ -630,6 +630,7 @@ impl Hash for RoomKey {
             CrdtType::Yjs => 3,
             CrdtType::YjsAwareness => 4,
             CrdtType::Elo => 5,
+            CrdtType::Flock => 6,
         };
         tag.hash(state);
         self.room.hash(state);

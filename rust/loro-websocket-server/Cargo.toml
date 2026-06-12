@@ -14,7 +14,7 @@ name = "loro_websocket_server"
 path = "src/lib.rs"
 
 [dependencies]
-loro-protocol = { version = "0.1.0", path = "../loro-protocol" }
+loro-protocol = { version = "0.3.0", path = "../loro-protocol" }
 tokio = { version = "1", features = ["rt", "macros", "net", "sync", "time"] }
 tokio-tungstenite = "0.27"
 futures-util = { version = "0.3", default-features = false, features = ["sink"] }

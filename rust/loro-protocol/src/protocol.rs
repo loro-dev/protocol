@@ -22,6 +22,8 @@ pub enum CrdtType {
     YjsAwareness,
     /// "%ELO" (End-to-End Encrypted Loro)
     Elo,
+    /// "%FLO"
+    Flock,
 }
 
 impl CrdtType {
@@ -33,6 +35,7 @@ impl CrdtType {
             CrdtType::Yjs => *b"%YJS",
             CrdtType::YjsAwareness => *b"%YAW",
             CrdtType::Elo => *b"%ELO",
+            CrdtType::Flock => *b"%FLO",
         }
     }
 
@@ -44,6 +47,7 @@ impl CrdtType {
             b"%YJS" => Some(CrdtType::Yjs),
             b"%YAW" => Some(CrdtType::YjsAwareness),
             b"%ELO" => Some(CrdtType::Elo),
+            b"%FLO" => Some(CrdtType::Flock),
             _ => None,
         }
     }

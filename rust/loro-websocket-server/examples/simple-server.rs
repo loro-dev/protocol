@@ -172,6 +172,7 @@ fn crdt_to_str(crdt: CrdtType) -> &'static str {
         CrdtType::Yjs => "yjs",
         CrdtType::YjsAwareness => "yjs_awareness",
         CrdtType::Elo => "elo",
+        CrdtType::Flock => "flock",
     }
 }
 
