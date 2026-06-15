@@ -181,7 +181,7 @@ export class LoroWebsocketClient {
   private roomAuth: Map<string, AuthOption | undefined> = new Map();
   private roomStatusListeners: Map<
     string,
-    Set<(s: RoomJoinStatusValue) => void>
+    Set<(s: RoomJoinStatusValue, messageType?: MessageType, messageCode?: number) => void>
   > = new Map();
   private socketListeners = new WeakMap<WebSocket, SocketListeners>();
 
@@ -625,7 +625,7 @@ export class LoroWebsocketClient {
           })
           .finally(() => {
             this.pendingRooms.delete(id);
-            this.emitRoomStatus(id, RoomJoinStatus.Joined);
+            this.emitRoomStatus(id, RoomJoinStatus.Joined, MessageType.JoinResponseOk);
           });
       },
       reject: (error: Error) => {
@@ -718,7 +718,7 @@ export class LoroWebsocketClient {
         } else {
           // Remove local room state so client does not auto-retry unless requested
           this.cleanupRoom(msg.roomId, msg.crdt);
-          this.emitRoomStatus(roomId, RoomJoinStatus.Error);
+          this.emitRoomStatus(roomId, RoomJoinStatus.Error, MessageType.RoomError, msg.code);
         }
         break;
       }
@@ -840,7 +840,7 @@ export class LoroWebsocketClient {
     }
 
     this.pendingRooms.delete(id);
-    this.emitRoomStatus(id, RoomJoinStatus.Joined);
+    this.emitRoomStatus(id, RoomJoinStatus.Joined, MessageType.JoinResponseOk);
   }
 
   private async handleJoinError(
@@ -857,7 +857,9 @@ export class LoroWebsocketClient {
         this.pendingRooms.delete(roomId);
         this.emitRoomStatus(
           pending.adaptor.crdtType + pending.roomId,
-          RoomJoinStatus.Error
+          RoomJoinStatus.Error,
+          MessageType.JoinError,
+          msg.code
         );
         return;
       }
@@ -895,7 +897,9 @@ export class LoroWebsocketClient {
     const err = new Error(`Join failed: ${msg.code} - ${msg.message}`);
     this.emitRoomStatus(
       pending.adaptor.crdtType + pending.roomId,
-      RoomJoinStatus.Error
+      RoomJoinStatus.Error,
+      MessageType.JoinError,
+      msg.code
     );
     // Remove active room references so caller can rejoin manually if this was a rejoin
     if (pending.isRejoin) {
@@ -913,7 +917,9 @@ export class LoroWebsocketClient {
     this.roomAdaptors.delete(id);
     this.roomIds.delete(id);
     this.roomAuth.delete(id);
-    this.roomStatusListeners.delete(id);
+    // Status listeners are intentionally kept so any emitRoomStatus call
+    // made immediately after cleanupRoom (e.g. RoomJoinStatus.Error) still
+    // reaches subscribers. They are cleared when the client is destroyed.
   }
 
   waitConnected() {
@@ -983,7 +989,7 @@ export class LoroWebsocketClient {
     roomId: string;
     crdtAdaptor: CrdtDocAdaptor;
     auth?: AuthOption;
-    onStatusChange?: (s: RoomJoinStatusValue) => void;
+    onStatusChange?: (s: RoomJoinStatusValue, messageType?: MessageType, messageCode?: number) => void;
   }): Promise<LoroWebsocketClientRoom> {
     const id = crdtAdaptor.crdtType + roomId;
     // Check if already joining or joined
@@ -1561,12 +1567,12 @@ export class LoroWebsocketClient {
     }
   }
 
-  private emitRoomStatus(roomKey: string, status: RoomJoinStatusValue) {
+  private emitRoomStatus(roomKey: string, status: RoomJoinStatusValue, messageType?: MessageType, messageCode?: number) {
     const set = this.roomStatusListeners.get(roomKey);
     if (!set || set.size === 0) return;
     for (const cb of Array.from(set)) {
       try {
-        cb(status);
+        cb(status, messageType, messageCode);
       } catch (err) {
         this.logCbError("onRoomStatusChange", err);
       }
