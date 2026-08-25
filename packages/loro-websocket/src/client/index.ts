@@ -208,7 +208,10 @@ export class LoroWebsocketClient {
 
     // Start initial connection
     this.ensureConnectedPromise();
-    void this.connect();
+    // Same bare-call adopter-promise hazard as scheduleReconnect() (see the
+    // comment there): swallow so a destroy() before this resolves can't
+    // surface as an unhandled rejection.
+    this.connect().catch(() => { });
   }
 
   private async resolveAuth(auth?: AuthOption): Promise<Uint8Array> {
@@ -557,7 +560,14 @@ export class LoroWebsocketClient {
     const delay = immediate ? 0 : this.computeBackoffDelay(attempt);
     this.reconnectTimer = setTimeout(() => {
       this.reconnectTimer = undefined;
-      void this.connect();
+      // `connect()` is async and, on its normal path, just returns the
+      // shared `connectedPromise` - so this call creates its own "adopter"
+      // promise chained to that shared promise. `ensureConnectedPromise()`
+      // only protects the shared promise itself; if it's later rejected
+      // (e.g. `destroy()` mid-reconnect) while this adopter promise has no
+      // handler, it surfaces as an unhandled rejection. Swallow it here;
+      // callers observe failures via `waitConnected()`/`onStatusChange`.
+      this.connect().catch(() => { });
     }, delay);
   }
 
@@ -1551,7 +1561,9 @@ export class LoroWebsocketClient {
   private sendJoinPayload(payload: Uint8Array) {
     if (this.safeSend(this.ws, payload, "join")) return;
     this.enqueueJoin(payload);
-    void this.connect();
+    // Same bare-call adopter-promise hazard as scheduleReconnect() (see the
+    // comment there).
+    this.connect().catch(() => { });
   }
 
   private flushQueuedJoins() {
