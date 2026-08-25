@@ -6,7 +6,7 @@ import {
   type JoinError,
 } from "loro-protocol";
 import * as protocol from "loro-protocol";
-import { LoroWebsocketClient } from "./index";
+import { LoroWebsocketClient, ClientStatus } from "./index";
 
 class FakeWebSocket {
   static CONNECTING = 0;
@@ -138,5 +138,60 @@ describe("LoroWebsocketClient", () => {
 
     expect(onError).toHaveBeenCalledTimes(1);
 
+  });
+
+  it("does not leave unhandled promise rejections when destroy() is called during an in-flight reconnect attempt", async () => {
+    // Reproduces the reconnect-adopter leak: scheduleReconnect()'s retry timer
+    // calls `void this.connect()` as a bare, unreferenced call. `connect()` is
+    // async and (on its normal path) just returns the shared
+    // `connectedPromise`, so each such call creates its own "adopter" promise
+    // chained to that shared promise. The shared promise itself is protected
+    // by a `.catch(() => {})` in `ensureConnectedPromise()`, but that does not
+    // protect these separate adopter promises. If `destroy()` rejects the
+    // shared promise while a reconnect attempt is still in flight, every
+    // accumulated adopter promise rejects too, with no handler anywhere.
+    const unhandled: unknown[] = [];
+    const onUnhandledRejection = (reason: unknown) => {
+      unhandled.push(reason);
+    };
+    process.on("unhandledRejection", onUnhandledRejection);
+
+    try {
+      const client = new LoroWebsocketClient({
+        url: "ws://test",
+        disablePing: true,
+        reconnect: { enabled: true, initialDelayMs: 5, maxDelayMs: 5, jitter: 0 },
+      });
+
+      // Bring the initial socket to Connected.
+      const firstWs = (client as any).ws as FakeWebSocket;
+      firstWs.readyState = FakeWebSocket.OPEN;
+      firstWs.dispatch("open", {});
+      expect(client.getStatus()).toBe(ClientStatus.Connected);
+
+      // Simulate an unexpected close, which schedules a reconnect attempt.
+      firstWs.readyState = FakeWebSocket.CLOSED;
+      firstWs.dispatch("close", { code: 1006, reason: "" });
+
+      // Wait for the reconnect timer to fire. This creates a new socket via
+      // scheduleReconnect()'s bare `void this.connect()` call - the adopter
+      // promise from the bug report.
+      await new Promise(resolve => setTimeout(resolve, 30));
+
+      // A second (never-opened) socket is now the active reconnect attempt.
+      expect((client as any).ws).not.toBe(firstWs);
+
+      // Destroying mid-reconnect rejects the shared connectedPromise. Without
+      // the fix, the adopter promise created above has no catch handler.
+      client.destroy();
+
+      // Give Node's event queue a chance to report any unhandled rejection
+      // before we assert.
+      await new Promise(resolve => setTimeout(resolve, 30));
+    } finally {
+      process.off("unhandledRejection", onUnhandledRejection);
+    }
+
+    expect(unhandled).toHaveLength(0);
   });
 });
