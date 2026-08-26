@@ -6,7 +6,7 @@ import {
   type JoinError,
 } from "loro-protocol";
 import * as protocol from "loro-protocol";
-import { LoroWebsocketClient } from "./index";
+import { JoinFailedError, LoroWebsocketClient } from "./index";
 
 class FakeWebSocket {
   static CONNECTING = 0;
@@ -138,5 +138,54 @@ describe("LoroWebsocketClient", () => {
 
     expect(onError).toHaveBeenCalledTimes(1);
 
+  });
+
+  it("rejects a join with a typed error carrying the code and appCode", async () => {
+    const client = new LoroWebsocketClient({
+      url: "ws://test",
+      disablePing: true,
+      reconnect: { enabled: false },
+    });
+
+    (client as any).connectedPromise?.catch(() => { });
+
+    const adaptor = {
+      crdtType: CrdtType.Loro,
+      setCtx: () => { },
+      getVersion: () => new Uint8Array([0]),
+      handleJoinOk: async () => { },
+      waitForReachingServerVersion: async () => { },
+      destroy: () => { },
+    } satisfies any;
+
+    const joinError: JoinError = {
+      type: MessageType.JoinError,
+      code: JoinErrorCode.AppError,
+      message: "room was purged",
+      appCode: "room_purged",
+      crdt: adaptor.crdtType,
+      roomId: "room",
+    };
+
+    let rejected: unknown;
+    const pending = {
+      room: Promise.resolve({} as any),
+      resolve: () => { },
+      reject: (e: Error) => {
+        rejected = e;
+      },
+      adaptor,
+      roomId: "room",
+    } satisfies any;
+
+    await (client as any).handleJoinError(joinError, pending, adaptor.crdtType + "room");
+
+    expect(rejected).toBeInstanceOf(JoinFailedError);
+    expect(rejected).toMatchObject({
+      code: JoinErrorCode.AppError,
+      appCode: "room_purged",
+      roomId: "room",
+      crdt: CrdtType.Loro,
+    });
   });
 });
