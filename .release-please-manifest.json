@@ -1,6 +1,6 @@
 {
   "packages/loro-adaptors": "0.6.1",
   "packages/loro-protocol": "0.3.0",
-  "packages/loro-websocket": "0.6.2",
-  "rust/loro-protocol": "0.3.0"
+  "packages/loro-websocket": "0.6.3",
+  "rust/loro-protocol": "0.3.1"
 }
