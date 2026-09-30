@@ -581,7 +581,7 @@ export class LoroWebsocketClient {
     if (this.shouldReconnect) {
       this.setStatus(ClientStatus.Disconnected);
       try {
-        this.ws?.close(1001, "Offline");
+        this.ws?.close(1000, "Offline");
       } catch { }
     }
   };
@@ -1396,7 +1396,7 @@ export class LoroWebsocketClient {
         this.awaitingPongSince = now;
         if (this.missedPongs >= 2) {
           try {
-            this.ws?.close(1001, "ping_timeout");
+            this.ws?.close(1000, "ping_timeout");
           } catch (err) {
             this.logCbError("pingTimer close", err);
           }
