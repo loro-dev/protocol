@@ -1072,6 +1072,47 @@ describe("E2E: RoomError rejoin policy", () => {
   }, 8000);
 });
 
+describe("React strict-mode: join + immediate close", () => {
+  let server: SimpleServer;
+  let port: number;
+
+  beforeAll(async () => {
+    port = await getPort();
+    server = new SimpleServer({ port });
+    await server.start();
+  });
+
+  afterAll(async () => {
+    await server.stop();
+  }, 15000);
+
+  it("close() before auth microtask settles does not resurrect the client", async () => {
+    const statuses: string[] = [];
+    const client = new LoroWebsocketClient({
+      url: `ws://localhost:${port}`,
+    });
+    await client.waitConnected();
+
+    client.onStatusChange(s => statuses.push(s));
+
+    // Simulate React strict-mode: effect fires join(), cleanup fires close()
+    const adaptor = new LoroAdaptor();
+    client.join({ roomId: "strict-mode-zombie", crdtAdaptor: adaptor });
+    client.close(); // shouldReconnect = false
+
+    // Let the resolveAuth().then(sendJoinPayload) microtask fire
+    await new Promise(r => setTimeout(r, 500));
+
+    // The client must stay dead — no Connecting/Connected after Disconnected
+    expect(client.getStatus()).toBe(ClientStatus.Disconnected);
+    expect(
+      statuses.filter(s => s === ClientStatus.Connecting)
+    ).toHaveLength(0);
+
+    client.destroy();
+  }, 5000);
+});
+
 function installMockWindow(initialOnline = true) {
   const originalWindowDescriptor = Object.getOwnPropertyDescriptor(
     globalThis,
