@@ -24,6 +24,28 @@ import type { CrdtDocAdaptor } from "loro-adaptors";
 
 export * from "loro-adaptors";
 
+/**
+ * Rejection reason for a failed `join`. Carries the wire fields of the
+ * `JoinError` that caused it so callers can branch on `code` — and, for
+ * `app_error`, on the application-defined `appCode` — instead of parsing
+ * `message`. The message text is unchanged from earlier releases.
+ */
+export class JoinFailedError extends Error {
+  readonly crdt: CrdtType;
+  readonly roomId: string;
+  readonly code: JoinErrorCode;
+  readonly appCode?: string;
+
+  constructor(msg: JoinError) {
+    super(`Join failed: ${msg.code} - ${msg.message}`);
+    this.name = "JoinFailedError";
+    this.crdt = msg.crdt;
+    this.roomId = msg.roomId;
+    this.code = msg.code;
+    this.appCode = msg.appCode;
+  }
+}
+
 export type AuthProvider = () => Uint8Array | Promise<Uint8Array>;
 type AuthOption = Uint8Array | AuthProvider;
 
@@ -894,7 +916,7 @@ export class LoroWebsocketClient {
     }
 
     // No retry possible, reject the promise
-    const err = new Error(`Join failed: ${msg.code} - ${msg.message}`);
+    const err = new JoinFailedError(msg);
     this.emitRoomStatus(
       pending.adaptor.crdtType + pending.roomId,
       RoomJoinStatus.Error,
