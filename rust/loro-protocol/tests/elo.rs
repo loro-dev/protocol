@@ -73,7 +73,7 @@ fn decode_container_and_parse_delta() {
         _ => panic!("expected delta header"),
     }
     assert_eq!(parsed.ct, &ct[..]);
-    assert!(parsed.aad.len() > 0);
+    assert!(!parsed.aad.is_empty());
 }
 
 #[test]

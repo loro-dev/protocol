@@ -49,9 +49,12 @@ pub struct ParsedEloRecord<'a> {
 
 /// Decode an ELO container into a list of record byte slices.
 /// The returned slices borrow from `data`.
-pub fn decode_elo_container<'a>(data: &'a [u8]) -> Result<Vec<&'a [u8]>, String> {
+pub fn decode_elo_container(data: &[u8]) -> Result<Vec<&[u8]>, String> {
     let mut r = BytesReader::new(data);
     let n = usize::try_from(r.read_uleb128()?).map_err(|_| "length too large".to_string())?;
+    if n > r.remaining() {
+        return Err("ELO record count exceeds remaining payload".into());
+    }
     let mut out: Vec<&[u8]> = Vec::with_capacity(n);
     for _ in 0..n {
         out.push(r.read_var_bytes()?);
@@ -99,7 +102,7 @@ fn parse_delta<'a>(
     if peer_id.len() > 64 {
         return Err("Invalid ELO delta span: peerId too long".into());
     }
-    if key_id.as_bytes().len() > 64 {
+    if key_id.len() > 64 {
         return Err("Invalid ELO delta span: keyId too long".into());
     }
 
@@ -126,6 +129,10 @@ fn parse_snapshot<'a>(
 ) -> Result<ParsedEloRecord<'a>, String> {
     let count =
         usize::try_from(r.read_uleb128()?).map_err(|_| "vv length too large".to_string())?;
+    // At least a peer-ID length byte and a counter byte are needed per entry.
+    if count > r.remaining() / 2 {
+        return Err("ELO version vector count exceeds remaining payload".into());
+    }
     let mut vv: Vec<(Vec<u8>, u64)> = Vec::with_capacity(count);
     for _ in 0..count {
         let pid = r.read_var_bytes()?.to_vec();
@@ -143,7 +150,7 @@ fn parse_snapshot<'a>(
     if iv_bytes.len() != 12 {
         return Err("Invalid ELO snapshot: IV must be 12 bytes".into());
     }
-    if key_id.as_bytes().len() > 64 {
+    if key_id.len() > 64 {
         return Err("Invalid ELO snapshot: keyId too long".into());
     }
     // vv should be sorted by peer_id bytes ascending

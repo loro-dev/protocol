@@ -9,8 +9,14 @@ pub struct BytesWriter {
 impl BytesWriter {
     #[must_use]
     pub fn new() -> Self {
+        Self::with_capacity(32)
+    }
+
+    /// Create a writer with space for a known encoded message size.
+    #[must_use]
+    pub fn with_capacity(capacity: usize) -> Self {
         Self {
-            buf: Vec::with_capacity(32),
+            buf: Vec::with_capacity(capacity),
         }
     }
 
@@ -119,6 +125,9 @@ impl<'a> BytesReader<'a> {
         let mut shift: u32 = 0;
         loop {
             let byte = self.read_byte()?;
+            if shift == 63 && byte & 0x7f > 1 {
+                return Err("uleb128 too large".into());
+            }
             result |= u64::from(byte & 0x7f) << shift;
             if (byte & 0x80) == 0 {
                 break;

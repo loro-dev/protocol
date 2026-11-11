@@ -7,6 +7,75 @@ use crate::protocol::*;
 
 const MAX_ROOM_ID_LENGTH: usize = 128;
 
+fn uleb128_len(n: u64) -> usize {
+    (64 - n.leading_zeros()).max(1).div_ceil(7) as usize
+}
+
+fn var_bytes_len(len: usize) -> usize {
+    len.saturating_add(uleb128_len(len as u64))
+}
+
+/// Size only the fields that the encoder actually writes. Optional JoinError
+/// fields depend on the error code, not merely on whether they are present.
+fn payload_len(message: &ProtocolMessage) -> usize {
+    match message {
+        ProtocolMessage::JoinRequest { auth, version, .. } => {
+            var_bytes_len(auth.len()).saturating_add(var_bytes_len(version.len()))
+        }
+        ProtocolMessage::JoinResponseOk {
+            permission,
+            version,
+            extra,
+            ..
+        } => {
+            let permission_len = match permission {
+                Permission::Read => 4,
+                Permission::Write => 5,
+            };
+            var_bytes_len(permission_len)
+                .saturating_add(var_bytes_len(version.len()))
+                .saturating_add(var_bytes_len(extra.as_ref().map_or(0, Vec::len)))
+        }
+        ProtocolMessage::JoinError {
+            code,
+            message,
+            receiver_version,
+            app_code,
+            ..
+        } => {
+            let mut len = 1usize.saturating_add(var_bytes_len(message.len()));
+            if matches!(code, JoinErrorCode::VersionUnknown) {
+                if let Some(version) = receiver_version {
+                    len = len.saturating_add(var_bytes_len(version.len()));
+                }
+            }
+            if matches!(code, JoinErrorCode::AppError) {
+                if let Some(app) = app_code {
+                    len = len.saturating_add(var_bytes_len(app.len()));
+                }
+            }
+            len
+        }
+        ProtocolMessage::DocUpdate { updates, .. } => updates.iter().fold(
+            uleb128_len(updates.len() as u64).saturating_add(8),
+            |len, update| len.saturating_add(var_bytes_len(update.len())),
+        ),
+        ProtocolMessage::DocUpdateFragmentHeader {
+            fragment_count,
+            total_size_bytes,
+            ..
+        } => 8 + uleb128_len(*fragment_count) + uleb128_len(*total_size_bytes),
+        ProtocolMessage::DocUpdateFragment {
+            index, fragment, ..
+        } => (8 + uleb128_len(*index)).saturating_add(var_bytes_len(fragment.len())),
+        ProtocolMessage::RoomError { message, .. } => {
+            1usize.saturating_add(var_bytes_len(message.len()))
+        }
+        ProtocolMessage::Ack { .. } => 9,
+        ProtocolMessage::Leave { .. } => 0,
+    }
+}
+
 fn encode_crdt(w: &mut BytesWriter, crdt: CrdtType) {
     w.push_bytes(&crdt.magic_bytes());
 }
@@ -48,10 +117,8 @@ fn decode_permission(r: &mut BytesReader) -> Result<Permission, String> {
 ///
 /// Returns an owned `Vec<u8>` containing the encoded message.
 pub fn encode(message: &ProtocolMessage) -> Result<Vec<u8>, String> {
-    let mut w = BytesWriter::new();
-
     // Common: crdt, room_id, type
-    match message {
+    let (crdt, room_id) = match message {
         ProtocolMessage::JoinRequest {
             crdt,
             room_id,
@@ -100,15 +167,21 @@ pub fn encode(message: &ProtocolMessage) -> Result<Vec<u8>, String> {
             ref_id: _,
             status: _,
         }
-        | ProtocolMessage::Leave { crdt, room_id } => {
-            let room_id_bytes = room_id.as_bytes();
-            if room_id_bytes.len() > MAX_ROOM_ID_LENGTH {
-                return Err("Room ID too long".into());
-            }
-            encode_crdt(&mut w, *crdt);
-            w.push_var_bytes(room_id_bytes);
-        }
+        | ProtocolMessage::Leave { crdt, room_id } => (*crdt, room_id),
+    };
+    if room_id.len() > MAX_ROOM_ID_LENGTH {
+        return Err("Room ID too long".into());
     }
+    let size = (5 + var_bytes_len(room_id.len())).saturating_add(payload_len(message));
+    if size > MAX_MESSAGE_SIZE {
+        return Err(format!(
+            "Message size {} exceeds maximum {}",
+            size, MAX_MESSAGE_SIZE
+        ));
+    }
+    let mut w = BytesWriter::with_capacity(size);
+    encode_crdt(&mut w, crdt);
+    w.push_var_bytes(room_id.as_bytes());
 
     // Type byte
     let ty: u8 = match message {
@@ -208,6 +281,7 @@ pub fn encode(message: &ProtocolMessage) -> Result<Vec<u8>, String> {
     }
 
     let out = w.finalize();
+    debug_assert_eq!(out.len(), size);
     if out.len() > MAX_MESSAGE_SIZE {
         return Err(format!(
             "Message size {} exceeds maximum {}",
@@ -286,7 +360,13 @@ pub fn decode(buf: &[u8]) -> Result<ProtocolMessage, String> {
             }
         }
         MessageType::DocUpdate => {
-            let count = r.read_uleb128()? as usize;
+            let count = usize::try_from(r.read_uleb128()?)
+                .map_err(|_| "Invalid DocUpdate: update count too large".to_string())?;
+            // Every update needs at least its one-byte length prefix, followed
+            // by the batch ID. Bound attacker-controlled capacity before allocation.
+            if count > r.remaining().saturating_sub(8) {
+                return Err("Invalid DocUpdate: update count exceeds remaining payload".into());
+            }
             let mut updates = Vec::with_capacity(count);
             for _ in 0..count {
                 updates.push(r.read_var_bytes()?.to_vec());
