@@ -206,6 +206,177 @@ mod tests {
         updates: Arc<Mutex<Vec<Vec<u8>>>>,
     }
 
+    fn fragment_timer_worker() -> (
+        ConnectionWorker,
+        mpsc::UnboundedReceiver<Message>,
+        Arc<Mutex<Vec<Vec<u8>>>>,
+        RoomKey,
+    ) {
+        let (tx, rx) = mpsc::unbounded_channel();
+        let worker = ConnectionWorker::new(
+            tx,
+            Arc::new(Mutex::new(HashMap::new())),
+            Arc::new(Mutex::new(HashMap::new())),
+            Arc::new(Mutex::new(HashMap::new())),
+            Arc::new(Mutex::new(HashMap::new())),
+            Arc::new(Mutex::new(HashMap::new())),
+            Arc::new(AtomicU64::new(1)),
+            Arc::new(StdMutex::new(HashMap::new())),
+            Arc::new(ClientConfig::default()),
+        );
+        let updates = Arc::new(Mutex::new(Vec::new()));
+        let key = RoomKey {
+            crdt: CrdtType::Loro,
+            room: "fragment-timer".to_string(),
+        };
+        (worker, rx, updates, key)
+    }
+
+    #[tokio::test(flavor = "current_thread", start_paused = true)]
+    async fn fragment_timer_does_not_expire_a_later_same_key_batch() {
+        use tokio::time::{sleep, Duration};
+
+        let (worker, _rx, updates, key) = fragment_timer_worker();
+        worker.adaptors.lock().await.insert(
+            key.clone(),
+            Box::new(RecordingAdaptor {
+                updates: updates.clone(),
+            }),
+        );
+        let batch_id = protocol::BatchId([3, 4, 5, 6, 7, 8, 9, 10]);
+        let header = |count, size| ProtocolMessage::DocUpdateFragmentHeader {
+            crdt: key.crdt,
+            room_id: key.room.clone(),
+            batch_id,
+            fragment_count: count,
+            total_size_bytes: size,
+        };
+        let fragment = |index, bytes: &[u8]| ProtocolMessage::DocUpdateFragment {
+            crdt: key.crdt,
+            room_id: key.room.clone(),
+            batch_id,
+            index,
+            fragment: bytes.to_vec(),
+        };
+
+        worker.handle_message(header(1, 1)).await;
+        // Let the first timer register before completing its batch.
+        sleep(Duration::from_millis(1)).await;
+        worker.handle_message(fragment(0, b"a")).await;
+        sleep(Duration::from_secs(5)).await;
+        worker.handle_message(header(2, 2)).await;
+        sleep(Duration::from_millis(1)).await;
+        worker.handle_message(fragment(0, b"b")).await;
+
+        // Pass the first deadline while staying before the new batch's deadline.
+        sleep(Duration::from_secs(5)).await;
+        worker.handle_message(fragment(1, b"c")).await;
+        assert_eq!(
+            updates.lock().await.as_slice(),
+            &[b"a".to_vec(), b"bc".to_vec()],
+            "an old timer must not discard a later batch with the same key"
+        );
+    }
+
+    #[tokio::test(flavor = "current_thread", start_paused = true)]
+    async fn fragment_timer_releases_sender_after_completion_or_room_cleanup() {
+        use tokio::time::{sleep, timeout, Duration};
+
+        for complete in [true, false] {
+            let (worker, mut rx, _updates, key) = fragment_timer_worker();
+            let batch_id = protocol::BatchId([4, 5, 6, 7, 8, 9, 10, 11]);
+            worker
+                .handle_message(ProtocolMessage::DocUpdateFragmentHeader {
+                    crdt: key.crdt,
+                    room_id: key.room.clone(),
+                    batch_id,
+                    fragment_count: 1,
+                    total_size_bytes: 1,
+                })
+                .await;
+            sleep(Duration::from_millis(1)).await;
+            if complete {
+                worker
+                    .handle_message(ProtocolMessage::DocUpdateFragment {
+                        crdt: key.crdt,
+                        room_id: key.room.clone(),
+                        batch_id,
+                        index: 0,
+                        fragment: b"x".to_vec(),
+                    })
+                    .await;
+            } else {
+                worker.cleanup_room(&key).await;
+            }
+            drop(worker);
+            assert!(
+                matches!(timeout(Duration::from_millis(1), rx.recv()).await, Ok(None)),
+                "a removed batch's timer must release its sender; completion={complete}"
+            );
+        }
+    }
+
+    #[tokio::test(flavor = "current_thread", start_paused = true)]
+    async fn fragment_timer_still_expires_an_incomplete_batch() {
+        use tokio::time::{timeout, Duration, Instant};
+
+        let (worker, mut rx, _updates, key) = fragment_timer_worker();
+        let batch_id = protocol::BatchId([5, 6, 7, 8, 9, 10, 11, 12]);
+        let started = Instant::now();
+        worker
+            .handle_message(ProtocolMessage::DocUpdateFragmentHeader {
+                crdt: key.crdt,
+                room_id: key.room.clone(),
+                batch_id,
+                fragment_count: 1,
+                total_size_bytes: 1,
+            })
+            .await;
+        let frame = timeout(Duration::from_secs(11), rx.recv())
+            .await
+            .expect("an incomplete batch must expire at its original deadline")
+            .expect("the expiry must send its acknowledgement");
+        let Message::Binary(bytes) = frame else {
+            panic!("expected the binary timeout acknowledgement");
+        };
+        assert!(started.elapsed() >= worker.config.fragment_reassembly_timeout);
+        assert!(matches!(
+            try_decode(&bytes),
+            Some(ProtocolMessage::Ack { crdt, room_id, ref_id, status })
+                if crdt == key.crdt && room_id == key.room
+                    && ref_id == batch_id && status == UpdateStatusCode::FragmentTimeout
+        ));
+        assert!(worker.frag_batches.lock().await.is_empty());
+        assert!(matches!(rx.try_recv(), Err(mpsc::error::TryRecvError::Empty)));
+    }
+
+    #[tokio::test(flavor = "current_thread", start_paused = true)]
+    async fn fragment_timer_does_not_keep_a_stopped_workers_batches_alive() {
+        use tokio::time::{sleep, timeout, Duration};
+
+        let (worker, mut rx, _updates, key) = fragment_timer_worker();
+        let batches = Arc::downgrade(&worker.frag_batches);
+        worker
+            .handle_message(ProtocolMessage::DocUpdateFragmentHeader {
+                crdt: key.crdt,
+                room_id: key.room,
+                batch_id: protocol::BatchId([6, 7, 8, 9, 10, 11, 12, 13]),
+                fragment_count: 2,
+                total_size_bytes: 2,
+            })
+            .await;
+        sleep(Duration::from_millis(1)).await;
+        drop(worker);
+        assert!(
+            batches.upgrade().is_none(),
+            "a timer must not keep the stopped worker's partial batches alive"
+        );
+        assert!(
+            matches!(timeout(Duration::from_millis(1), rx.recv()).await, Ok(None)),
+            "a stopped worker's obsolete timer must release its sender"
+        );
+    }
+
     #[async_trait::async_trait]
     impl CrdtDocAdaptor for RecordingAdaptor {
         fn crdt_type(&self) -> CrdtType {
@@ -294,6 +465,198 @@ mod tests {
 
         let updates = collected.lock().await;
         assert_eq!(updates.as_slice(), &[b"helloworld".to_vec()]);
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn fragment_reassembly_counts_empty_fragment_once() {
+        let (tx, _rx) = mpsc::unbounded_channel::<Message>();
+        let adaptors = Arc::new(Mutex::new(HashMap::new()));
+        let worker = ConnectionWorker::new(
+            tx,
+            Arc::new(Mutex::new(HashMap::new())),
+            Arc::new(Mutex::new(HashMap::new())),
+            adaptors.clone(),
+            Arc::new(Mutex::new(HashMap::new())),
+            Arc::new(Mutex::new(HashMap::new())),
+            Arc::new(AtomicU64::new(1)),
+            Arc::new(StdMutex::new(HashMap::new())),
+            Arc::new(ClientConfig::default()),
+        );
+
+        let room_id = "room-empty-frag".to_string();
+        let collected = Arc::new(Mutex::new(Vec::<Vec<u8>>::new()));
+        adaptors.lock().await.insert(
+            RoomKey {
+                crdt: CrdtType::Loro,
+                room: room_id.clone(),
+            },
+            Box::new(RecordingAdaptor {
+                updates: collected.clone(),
+            }),
+        );
+
+        let batch_id = protocol::BatchId([1, 2, 3, 4, 5, 6, 7, 8]);
+        worker
+            .handle_message(ProtocolMessage::DocUpdateFragmentHeader {
+                crdt: CrdtType::Loro,
+                room_id: room_id.clone(),
+                batch_id,
+                fragment_count: 2,
+                total_size_bytes: 1,
+            })
+            .await;
+
+        for _ in 0..2 {
+            worker
+                .handle_message(ProtocolMessage::DocUpdateFragment {
+                    crdt: CrdtType::Loro,
+                    room_id: room_id.clone(),
+                    batch_id,
+                    index: 0,
+                    fragment: Vec::new(),
+                })
+                .await;
+            assert!(
+                collected.lock().await.is_empty(),
+                "duplicate empty fragments must not complete an incomplete batch"
+            );
+        }
+
+        worker
+            .handle_message(ProtocolMessage::DocUpdateFragment {
+                crdt: CrdtType::Loro,
+                room_id,
+                batch_id,
+                index: 1,
+                fragment: b"x".to_vec(),
+            })
+            .await;
+
+        assert_eq!(collected.lock().await.as_slice(), &[b"x".to_vec()]);
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn fragment_reassembly_preserves_fragments_on_duplicate_header() {
+        let (tx, _rx) = mpsc::unbounded_channel::<Message>();
+        let adaptors = Arc::new(Mutex::new(HashMap::new()));
+        let worker = ConnectionWorker::new(
+            tx,
+            Arc::new(Mutex::new(HashMap::new())),
+            Arc::new(Mutex::new(HashMap::new())),
+            adaptors.clone(),
+            Arc::new(Mutex::new(HashMap::new())),
+            Arc::new(Mutex::new(HashMap::new())),
+            Arc::new(AtomicU64::new(1)),
+            Arc::new(StdMutex::new(HashMap::new())),
+            Arc::new(ClientConfig::default()),
+        );
+        let room_id = "room-duplicate-header".to_string();
+        let collected = Arc::new(Mutex::new(Vec::<Vec<u8>>::new()));
+        adaptors.lock().await.insert(
+            RoomKey {
+                crdt: CrdtType::Loro,
+                room: room_id.clone(),
+            },
+            Box::new(RecordingAdaptor {
+                updates: collected.clone(),
+            }),
+        );
+        let batch_id = protocol::BatchId([2, 3, 4, 5, 6, 7, 8, 9]);
+        let header = ProtocolMessage::DocUpdateFragmentHeader {
+            crdt: CrdtType::Loro,
+            room_id: room_id.clone(),
+            batch_id,
+            fragment_count: 2,
+            total_size_bytes: 4,
+        };
+        for message in [
+            header.clone(),
+            ProtocolMessage::DocUpdateFragment {
+                crdt: CrdtType::Loro,
+                room_id: room_id.clone(),
+                batch_id,
+                index: 0,
+                fragment: b"ab".to_vec(),
+            },
+            header,
+        ] {
+            worker.handle_message(message).await;
+            assert!(collected.lock().await.is_empty());
+        }
+        worker
+            .handle_message(ProtocolMessage::DocUpdateFragment {
+                crdt: CrdtType::Loro,
+                room_id,
+                batch_id,
+                index: 1,
+                fragment: b"cd".to_vec(),
+            })
+            .await;
+        assert_eq!(
+            collected.lock().await.as_slice(),
+            &[b"abcd".to_vec()],
+            "a duplicate header must preserve fragments already received"
+        );
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn fragment_reassembly_uses_received_bytes_not_declared_size() {
+        let (tx, _rx) = mpsc::unbounded_channel::<Message>();
+        let adaptors = Arc::new(Mutex::new(HashMap::new()));
+        let worker = ConnectionWorker::new(
+            tx,
+            Arc::new(Mutex::new(HashMap::new())),
+            Arc::new(Mutex::new(HashMap::new())),
+            adaptors.clone(),
+            Arc::new(Mutex::new(HashMap::new())),
+            Arc::new(Mutex::new(HashMap::new())),
+            Arc::new(AtomicU64::new(1)),
+            Arc::new(StdMutex::new(HashMap::new())),
+            Arc::new(ClientConfig::default()),
+        );
+        let room_id = "room-fragment-capacity".to_string();
+        let collected = Arc::new(Mutex::new(Vec::<Vec<u8>>::new()));
+        adaptors.lock().await.insert(
+            RoomKey {
+                crdt: CrdtType::Loro,
+                room: room_id.clone(),
+            },
+            Box::new(RecordingAdaptor {
+                updates: collected.clone(),
+            }),
+        );
+
+        // Preserve accepted mismatched sizes as well as ordinary sender sizing.
+        // The maximum declaration must not request a huge output reservation.
+        for (index, total_size_bytes) in [0, 2, u64::MAX].into_iter().enumerate() {
+            let batch_id = protocol::BatchId([index as u8 + 1; 8]);
+            let header = ProtocolMessage::DocUpdateFragmentHeader {
+                crdt: CrdtType::Loro,
+                room_id: room_id.clone(),
+                batch_id,
+                fragment_count: 1,
+                total_size_bytes,
+            };
+            let encoded = encode(&header).expect("small header encodes");
+            let decoded = try_decode(&encoded).expect("small header decodes");
+            worker.handle_message(decoded).await;
+            assert_eq!(collected.lock().await.len(), index);
+
+            worker
+                .handle_message(ProtocolMessage::DocUpdateFragment {
+                    crdt: CrdtType::Loro,
+                    room_id: room_id.clone(),
+                    batch_id,
+                    index: 0,
+                    fragment: b"ok".to_vec(),
+                })
+                .await;
+            assert_eq!(
+                collected.lock().await.as_slice(),
+                vec![b"ok".to_vec(); index + 1].as_slice(),
+                "declared size {total_size_bytes}"
+            );
+        }
     }
 
     #[tokio::test(flavor = "current_thread")]
@@ -460,31 +823,46 @@ impl ConnectionWorker {
             ProtocolMessage::DocUpdateFragmentHeader {
                 batch_id,
                 fragment_count,
-                total_size_bytes,
                 ..
             } => {
-                // Insert batch state
+                // Preserve partial state and its deadline on duplicate headers.
                 let mut map = self.frag_batches.lock().await;
-                map.insert(
-                    (key.clone(), batch_id),
-                    FragmentBatch {
-                        fragment_count: fragment_count as usize,
-                        total_size_bytes: total_size_bytes as usize,
-                        slots: vec![Vec::new(); fragment_count as usize],
-                        received: 0,
-                    },
-                );
+                let std::collections::hash_map::Entry::Vacant(entry) =
+                    map.entry((key.clone(), batch_id))
+                else {
+                    return;
+                };
+                let (cancel_timeout, mut cancellation) = oneshot::channel::<()>();
+                entry.insert(FragmentBatch {
+                    fragment_count: fragment_count as usize,
+                    slots: vec![None; fragment_count as usize],
+                    received: 0,
+                    _cancel_timeout: cancel_timeout,
+                });
                 drop(map);
 
                 // Start a timeout; drop and report FragmentTimeout on expiry.
-                let batches = self.frag_batches.clone();
+                let batches = Arc::downgrade(&self.frag_batches);
                 let key_clone = key.clone();
                 let tx_timeout = self.tx.clone();
                 let timeout = self.config.fragment_reassembly_timeout;
                 tokio::spawn(async move {
                     use tokio::time::sleep;
-                    sleep(timeout).await;
+                    tokio::select! {
+                        _ = &mut cancellation => return,
+                        _ = sleep(timeout) => {}
+                    }
+                    let Some(batches) = batches.upgrade() else {
+                        return;
+                    };
                     let mut m = batches.lock().await;
+                    // Removal/replacement closes this batch's sender under the same lock.
+                    if !matches!(
+                        cancellation.try_recv(),
+                        Err(oneshot::error::TryRecvError::Empty)
+                    ) {
+                        return;
+                    }
                     if m.remove(&(key_clone.clone(), batch_id)).is_some() {
                         let ack = ProtocolMessage::Ack {
                             crdt: key_clone.crdt,
@@ -507,13 +885,14 @@ impl ConnectionWorker {
                 let mut map = self.frag_batches.lock().await;
                 if let Some(batch) = map.get_mut(&(key.clone(), batch_id)) {
                     let i = index as usize;
-                    if i < batch.slots.len() && batch.slots[i].is_empty() {
-                        batch.slots[i] = fragment;
+                    if i < batch.slots.len() && batch.slots[i].is_none() {
+                        batch.slots[i] = Some(fragment);
                         batch.received += 1;
                     }
                     if batch.received == batch.fragment_count {
-                        let mut reassembled = Vec::with_capacity(batch.total_size_bytes);
-                        for s in batch.slots.iter() {
+                        let total_size_bytes = batch.slots.iter().flatten().map(Vec::len).sum();
+                        let mut reassembled = Vec::with_capacity(total_size_bytes);
+                        for s in batch.slots.iter().flatten() {
                             reassembled.extend_from_slice(s);
                         }
                         map.remove(&(key.clone(), batch_id));
@@ -1139,9 +1518,10 @@ fn msg_room_id(msg: &ProtocolMessage) -> String {
 // --- Fragment reassembly holder ---
 struct FragmentBatch {
     fragment_count: usize,
-    total_size_bytes: usize,
-    slots: Vec<Vec<u8>>,
+    slots: Vec<Option<Vec<u8>>>,
     received: usize,
+    // Dropping the batch cancels its timer without keeping a task handle.
+    _cancel_timeout: oneshot::Sender<()>,
 }
 
 // --- Generic CRDT adaptor trait and context ---
