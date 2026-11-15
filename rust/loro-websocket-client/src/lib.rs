@@ -771,24 +771,34 @@ impl LoroWebsocketClient {
             },
         );
 
-        let (tx_done, rx_done) = oneshot::channel::<JoinOutcome>();
-        self.pending.lock().await.insert(key.clone(), tx_done);
+        // Send join with local version/auth. If the receiver cannot interpret
+        // that version, rejoin once with an empty version, as
+        // `join_with_adaptor` does.
+        let mut version = doc.lock().await.oplog_vv().encode();
+        let outcome = loop {
+            let (tx_done, rx_done) = oneshot::channel::<JoinOutcome>();
+            self.pending.lock().await.insert(key.clone(), tx_done);
+            let msg = ProtocolMessage::JoinRequest {
+                crdt: CrdtType::Loro,
+                room_id: key.room.clone(),
+                auth: Vec::new(),
+                version: version.clone(),
+            };
+            let data = encode(&msg).map_err(ClientError::Protocol)?;
+            self.tx
+                .send(Message::Binary(data.into()))
+                .map_err(|_| ClientError::Protocol("send failed".into()))?;
 
-        // Send join with local version/auth
-        let local_version = doc.lock().await.oplog_vv().encode();
-        let msg = ProtocolMessage::JoinRequest {
-            crdt: CrdtType::Loro,
-            room_id: key.room.clone(),
-            auth: Vec::new(),
-            version: local_version,
+            // Await join result
+            match rx_done.await {
+                Ok(JoinOutcome::Err {
+                    code: protocol::JoinErrorCode::VersionUnknown,
+                    ..
+                }) if !version.is_empty() => version = Vec::new(),
+                outcome => break outcome,
+            }
         };
-        let data = encode(&msg).map_err(ClientError::Protocol)?;
-        self.tx
-            .send(Message::Binary(data.into()))
-            .map_err(|_| ClientError::Protocol("send failed".into()))?;
-
-        // Await join result
-        match rx_done.await {
+        match outcome {
             Ok(JoinOutcome::Ok { permission, .. }) => {
                 // Only subscribe to local updates if we have write permission
                 if matches!(permission, protocol::Permission::Write) {
